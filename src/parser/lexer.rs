@@ -524,4 +524,22 @@ mod tests {
         assert_eq!(tokens[2].kind, TokenKind::IntLiteral);
         assert_eq!(tokens[2].line, 3);
     }
+
+    #[test]
+    fn test_max_string_length() {
+        // Create a string that exceeds MAX_STRING_LENGTH (1MB)
+        let mut input = String::from("\"");
+        // Add 1,000,001 characters (exceeds 1MB limit)
+        for _ in 0..1_000_001 {
+            input.push('a');
+        }
+        input.push('"');
+
+        let mut lexer = Lexer::new(&input);
+        let tokens = lexer.tokenize();
+
+        // Should get an error token
+        assert!(tokens[0].lexeme.starts_with("ERROR"));
+        assert!(tokens[0].lexeme.contains("maximum length"));
+    }
 }
