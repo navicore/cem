@@ -10,6 +10,7 @@ The standard library for the Cem programming language.
 stdlib/
   core.cem          # Essential combinators (always available)
   prelude.cem       # Auto-imported basics (Option, Result, List utilities)
+  unimplemented.cem # Combinators requiring compiler support (documentation only)
 
   data/
     option.cem      # Option<T> utilities

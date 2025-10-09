@@ -1,0 +1,278 @@
+# core_test.cem - Tests for core.cem combinators
+#
+# These tests validate all the core combinators work as documented.
+# Run with: cem test stdlib/core_test.cem
+
+# ============================================================================
+# TEST FRAMEWORK (minimal, until we have proper test framework)
+# ============================================================================
+
+: assert-eq ( A A String -- )
+  # Assert two values are equal, panic with message if not
+  # Stack: actual expected message
+  rot rot = not
+  [ "Assertion failed: " swap concat panic ]
+  [ drop ]
+  if ;
+
+: assert-true ( Bool String -- )
+  # Assert value is true, panic with message if not
+  swap not
+  [ "Assertion failed: " swap concat panic ]
+  [ drop ]
+  if ;
+
+# ============================================================================
+# BASIC STACK OPERATIONS TESTS
+# ============================================================================
+
+: test-dup ( -- )
+  5 dup = "dup should duplicate top element" assert-true
+  10 dup + 20 = "dup should enable self-addition" assert-true ;
+
+: test-drop ( -- )
+  5 10 drop 5 = "drop should remove top element" assert-true ;
+
+: test-swap ( -- )
+  5 10 swap 5 = "swap should put second on top" assert-true
+  drop ;
+
+: test-over ( -- )
+  5 10 over 5 = "over should copy second to top" assert-true
+  drop drop drop ;
+
+: test-rot ( -- )
+  1 2 3 rot 2 = "rot should bring third to top" assert-true
+  drop drop drop ;
+
+# ============================================================================
+# FUNDAMENTAL COMBINATORS TESTS
+# ============================================================================
+
+: test-dip ( -- )
+  # 10 20 30 [ + ] dip should compute 10+20=30, then put 30 back
+  10 20 30 [ + ] dip 30 = "dip result should be 30" assert-true
+  30 = "dip should preserve top element" assert-true ;
+
+: test-keep ( -- )
+  # 5 [ dup * ] keep should compute 25 and keep 5
+  5 [ dup * ] keep 5 = "keep should preserve original" assert-true
+  25 = "keep should produce square" assert-true ;
+
+: test-2dip ( -- )
+  # 10 20 30 40 [ + ] 2dip should compute 10+20, preserve 30 40
+  10 20 30 40 [ + ] 2dip 40 = "2dip top" assert-true
+  30 = "2dip second" assert-true
+  30 = "2dip result" assert-true ;
+
+: test-bi ( -- )
+  # 5 [ dup * ] [ 2 * ] bi should produce 25 and 10
+  5 [ dup * ] [ 2 * ] bi 10 = "bi second result" assert-true
+  25 = "bi first result" assert-true ;
+
+: test-tri ( -- )
+  # 5 [ dup * ] [ 2 * ] [ 1 + ] tri should produce 25, 10, 6
+  5 [ dup * ] [ 2 * ] [ 1 + ] tri
+  6 = "tri third result" assert-true
+  10 = "tri second result" assert-true
+  25 = "tri first result" assert-true ;
+
+: test-bi-star ( -- )
+  # 5 10 [ dup * ] [ 2 * ] bi* should produce 25 and 20
+  5 10 [ dup * ] [ 2 * ] bi*
+  20 = "bi* second result" assert-true
+  25 = "bi* first result" assert-true ;
+
+: test-bi-at ( -- )
+  # 5 10 [ dup * ] bi@ should produce 25 and 100
+  5 10 [ dup * ] bi@
+  100 = "bi@ second result" assert-true
+  25 = "bi@ first result" assert-true ;
+
+# ============================================================================
+# CONDITIONAL COMBINATOR TESTS
+# ============================================================================
+
+: test-when-true ( -- )
+  # -5 with condition true should become 5
+  -5 dup 0 < [ 0 swap - ] when
+  5 = "when should execute on true" assert-true ;
+
+: test-when-false ( -- )
+  # 5 with condition false should stay 5
+  5 dup 0 < [ 0 swap - ] when
+  5 = "when should not execute on false" assert-true ;
+
+: test-unless-true ( -- )
+  # 5 with condition true should stay 5
+  5 dup 0 < [ 0 swap - ] unless
+  5 = "unless should not execute on true" assert-true ;
+
+: test-unless-false ( -- )
+  # -5 with condition false should become 5
+  -5 dup 0 < [ 0 swap - ] unless
+  -5 = "unless should not execute when condition true" assert-true ;
+
+# ============================================================================
+# LOOP COMBINATOR TESTS
+# ============================================================================
+
+: test-times ( -- )
+  # Count from 0 to 4 (5 iterations)
+  0
+  5 [ 1 + ] times
+  5 = "times should execute N times" assert-true ;
+
+: test-while ( -- )
+  # Countdown from 5 to 0
+  5
+  [ dup 0 > ]
+  [ 1 - ]
+  while
+  0 = "while should loop until condition false" assert-true ;
+
+# ============================================================================
+# DATA FLOW COMBINATOR TESTS
+# ============================================================================
+
+: test-nip ( -- )
+  5 10 nip 10 = "nip should keep top" assert-true ;
+
+: test-tuck ( -- )
+  5 10 tuck 5 = "tuck top" assert-true
+  10 = "tuck second" assert-true
+  5 = "tuck third" assert-true ;
+
+: test-2dup ( -- )
+  5 10 2dup
+  10 = "2dup top" assert-true
+  5 = "2dup second" assert-true
+  10 = "2dup third" assert-true
+  5 = "2dup fourth" assert-true ;
+
+: test-2drop ( -- )
+  1 2 3 4 2drop
+  2 = "2drop should leave second pair" assert-true
+  1 = "2drop should leave first" assert-true ;
+
+: test-dupd ( -- )
+  5 10 dupd
+  10 = "dupd top" assert-true
+  5 = "dupd second" assert-true
+  5 = "dupd third" assert-true ;
+
+# ============================================================================
+# BOOLEAN COMBINATOR TESTS
+# ============================================================================
+
+: test-not ( -- )
+  true not false = "not true should be false" assert-true
+  false not true = "not false should be true" assert-true ;
+
+: test-and ( -- )
+  true true and true = "true and true" assert-true
+  true false and false = "true and false" assert-true
+  false true and false = "false and true" assert-true
+  false false and false = "false and false" assert-true ;
+
+: test-or ( -- )
+  true true or true = "true or true" assert-true
+  true false or true = "true or false" assert-true
+  false true or true = "false or true" assert-true
+  false false or false = "false or false" assert-true ;
+
+: test-xor ( -- )
+  true true xor false = "true xor true" assert-true
+  true false xor true = "true xor false" assert-true
+  false true xor true = "false xor true" assert-true
+  false false xor false = "false xor false" assert-true ;
+
+# ============================================================================
+# COMPARISON COMBINATOR TESTS
+# ============================================================================
+
+: test-not-equal ( -- )
+  5 10 != true = "5 != 10" assert-true
+  5 5 != false = "5 != 5" assert-true ;
+
+: test-less-equal ( -- )
+  5 10 <= true = "5 <= 10" assert-true
+  10 10 <= true = "10 <= 10" assert-true
+  15 10 <= false = "15 <= 10" assert-true ;
+
+: test-greater-equal ( -- )
+  15 10 >= true = "15 >= 10" assert-true
+  10 10 >= true = "10 >= 10" assert-true
+  5 10 >= false = "5 >= 10" assert-true ;
+
+: test-min ( -- )
+  5 10 min 5 = "min of 5 and 10" assert-true
+  10 5 min 5 = "min of 10 and 5" assert-true ;
+
+: test-max ( -- )
+  5 10 max 10 = "max of 5 and 10" assert-true
+  10 5 max 10 = "max of 10 and 5" assert-true ;
+
+: test-clamp ( -- )
+  5 0 10 clamp 5 = "clamp in range" assert-true
+  -5 0 10 clamp 0 = "clamp below min" assert-true
+  15 0 10 clamp 10 = "clamp above max" assert-true ;
+
+: test-between ( -- )
+  5 0 10 between true = "5 between 0 and 10" assert-true
+  -5 0 10 between false = "-5 not between 0 and 10" assert-true
+  15 0 10 between false = "15 not between 0 and 10" assert-true ;
+
+# ============================================================================
+# RUN ALL TESTS
+# ============================================================================
+
+: run-all-tests ( -- )
+  "Running core.cem tests..." println
+
+  test-dup
+  test-drop
+  test-swap
+  test-over
+  test-rot
+
+  test-dip
+  test-keep
+  test-2dip
+  test-bi
+  test-tri
+  test-bi-star
+  test-bi-at
+
+  test-when-true
+  test-when-false
+  test-unless-true
+  test-unless-false
+
+  test-times
+  test-while
+
+  test-nip
+  test-tuck
+  test-2dup
+  test-2drop
+  test-dupd
+
+  test-not
+  test-and
+  test-or
+  test-xor
+
+  test-not-equal
+  test-less-equal
+  test-greater-equal
+  test-min
+  test-max
+  test-clamp
+  test-between
+
+  "All core.cem tests passed!" println ;
+
+# Entry point
+: main ( -- )
+  run-all-tests ;

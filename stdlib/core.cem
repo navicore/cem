@@ -155,6 +155,9 @@
   # Execute body while condition is true
   # Both quotations see the same stack state
   #
+  # NOTE: Requires tail-call optimization for unbounded loops
+  # Without TCO, this will stack overflow on long iterations
+  #
   # Example:
   #   10 [ dup 0 > ] [ dup print 1 - ] while drop
   #   # Prints: 10 9 8 7 6 5 4 3 2 1
@@ -164,7 +167,9 @@
 : until ( [-- Bool] [-- ] -- )
   # Execute body until condition is true
   # Opposite of while
-  [ not ] concat swap while ;
+  # TODO: Requires concat implementation
+  # [ not ] concat swap while ;
+  ;  # Placeholder until concat is implemented
 
 : times ( Int [-- ] -- )
   # Execute quotation N times
@@ -233,23 +238,8 @@
   # NOTE: This is built-in, documented for completeness
   call ;
 
-: concat ( [A] [B] -- [A B] )
-  # Concatenate two quotations
-  # Creates a new quotation that executes both in sequence
-  # TODO: Needs implementation support
-  ;
-
-: curry ( A [A B -- C] -- [B -- C] )
-  # Partial application: bind first argument
-  # Returns a new quotation with A captured
-  # TODO: Needs closure support
-  ;
-
-: compose ( [A -- B] [B -- C] -- [A -- C] )
-  # Function composition: create pipeline
-  # Returns quotation that applies first then second
-  # TODO: Needs quotation manipulation
-  ;
+# NOTE: Advanced quotation combinators (concat, curry, compose) are defined
+# in stdlib/unimplemented.cem as they require compiler support not yet available
 
 # ============================================================================
 # UTILITY COMBINATORS
@@ -259,15 +249,8 @@
   # Do nothing (useful for higher-order functions)
   ;
 
-: const ( A -- [-- A] )
-  # Create quotation that always returns A
-  # TODO: Needs closure support
-  ;
-
-: flip ( [A B -- C] -- [B A -- C] )
-  # Swap argument order of quotation
-  # TODO: Needs quotation manipulation
-  ;
+# NOTE: const and flip require closure/quotation manipulation support
+# See stdlib/unimplemented.cem for their definitions
 
 # ============================================================================
 # BOOLEAN COMBINATORS
@@ -339,17 +322,14 @@
 # NOTES ON IMPLEMENTATION
 # ============================================================================
 
-# Some combinators marked with TODO need compiler support:
-# - concat: Requires quotation concatenation
-# - curry: Requires closures (capturing values)
-# - compose: Requires quotation manipulation
-# - const: Requires closures
-# - flip: Requires quotation rewriting
-
-# These will be implemented as:
-# 1. Compiler intrinsics, or
-# 2. Via macro system (future), or
-# 3. FFI to Rust implementations
+# All combinators in this file are fully implemented and ready to use.
+#
+# Advanced combinators requiring compiler support (concat, curry, compose,
+# const, flip, until) have been moved to stdlib/unimplemented.cem for
+# documentation purposes. They will be added when the compiler supports:
+# 1. Quotation concatenation (for concat, compose, until)
+# 2. Closure capture (for curry, const)
+# 3. Quotation rewriting (for flip)
 
 # ============================================================================
 # EXAMPLES

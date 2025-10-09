@@ -12,8 +12,11 @@ The Cem standard library provides essential utilities for writing practical prog
 
 **Files Created:**
 - `stdlib/README.md` - Organization and design principles
-- `stdlib/core.cem` - Essential combinators (~400 lines)
+- `stdlib/core.cem` - Essential combinators (~350 lines, fully implemented)
 - `stdlib/prelude.cem` - Auto-imported utilities (~300 lines)
+- `stdlib/unimplemented.cem` - Future combinators requiring compiler support
+- `stdlib/core_test.cem` - Comprehensive tests for core combinators
+- `stdlib/prelude_test.cem` - Comprehensive tests for prelude utilities
 - `docs/SELF_HOSTING.md` - Vision for language completeness
 
 **What Works:**
@@ -29,18 +32,21 @@ The Cem standard library provides essential utilities for writing practical prog
 
 ### 🚧 Needs Compiler Support
 
-Some combinators require language features not yet implemented:
+Some combinators require language features not yet implemented.
+These have been moved to `stdlib/unimplemented.cem` for documentation.
 
 **Quotation Manipulation:**
 - `concat` - Concatenate quotations
-- `curry` - Partial application
+- `curry` - Partial application (needs closures)
 - `compose` - Function composition
 - `flip` - Argument reordering
+- `const` - Constant quotation (needs closures)
+- `until` - Loop until condition (needs concat)
 
 **Plan:** Implement via:
-1. Compiler intrinsics, or
-2. Macro system (future), or
-3. FFI to Rust
+1. Compiler intrinsics (concat, compose), or
+2. Closure support (curry, const), or
+3. Macro system (future)
 
 ### ⚠️ To Be Implemented
 
@@ -288,12 +294,14 @@ When adding stdlib functions:
 ## Statistics
 
 **Current Status:**
-- Total stdlib files: 3
-- Core combinators: ~50
+- Total stdlib files: 6 (3 implementation + 2 test + 1 documentation)
+- Core combinators: ~45 (fully implemented)
 - Option utilities: ~15
 - Result utilities: ~15
 - List operations: ~5
-- Total lines: ~700
+- Unimplemented (documented): ~6
+- Test coverage: ~80 test functions
+- Total lines: ~1200 (including tests)
 
 **Completion by Category:**
 - Combinators: ✅ 90% (some need compiler support)

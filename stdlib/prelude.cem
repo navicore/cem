@@ -25,7 +25,7 @@
   #   Some(42) is-some  # Stack: true
   #   None is-some      # Stack: false
   match
-    Some => [ drop true ]
+    Some(_) => [ true ]
     None => [ false ]
   end ;
 
