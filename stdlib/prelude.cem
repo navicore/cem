@@ -1,0 +1,418 @@
+# prelude.cem - Auto-imported Utilities for Cem
+#
+# This file contains commonly-used utilities that are automatically available
+# in every Cem program without explicit import.
+#
+# Contents:
+# - Option<T> utilities
+# - Result<T,E> utilities
+# - Basic List operations
+# - Common patterns
+
+# Import core combinators (always available)
+# import core
+
+# ============================================================================
+# OPTION UTILITIES
+# ============================================================================
+
+# NOTE: Option type and constructors (Some, None) are built into the compiler
+
+: is-some ( Option(A) -- Bool )
+  # Check if Option contains a value
+  #
+  # Example:
+  #   Some(42) is-some  # Stack: true
+  #   None is-some      # Stack: false
+  match
+    Some => [ drop true ]
+    None => [ false ]
+  end ;
+
+: is-none ( Option(A) -- Bool )
+  # Check if Option is None
+  is-some not ;
+
+: unwrap ( Option(A) -- A )
+  # Extract value from Option, panic if None
+  # UNSAFE: Only use when you're certain Option is Some
+  #
+  # Example:
+  #   Some(42) unwrap  # Stack: 42
+  #   None unwrap      # PANIC!
+  match
+    Some => [ ]
+    None => [ "unwrap called on None" panic ]
+  end ;
+
+: unwrap-or ( Option(A) A -- A )
+  # Extract value from Option, or use default if None
+  #
+  # Example:
+  #   Some(42) 0 unwrap-or  # Stack: 42
+  #   None 0 unwrap-or      # Stack: 0
+  swap match
+    Some => [ swap drop ]
+    None => [ ]
+  end ;
+
+: unwrap-or-else ( Option(A) [-- A] -- A )
+  # Extract value from Option, or compute default if None
+  # Lazy evaluation: quotation only called if needed
+  #
+  # Example:
+  #   None [ "default" ] unwrap-or-else  # Stack: "default"
+  swap match
+    Some => [ drop ]
+    None => [ call ]
+  end ;
+
+: expect ( Option(A) String -- A )
+  # Extract value from Option, panic with message if None
+  #
+  # Example:
+  #   None "value required" expect  # PANIC with message
+  swap match
+    Some => [ drop ]
+    None => [ panic ]
+  end ;
+
+: map-option ( Option(A) [A -- B] -- Option(B) )
+  # Apply function to value inside Option, or return None
+  #
+  # Example:
+  #   Some(5) [ 2 * ] map-option  # Stack: Some(10)
+  #   None [ 2 * ] map-option     # Stack: None
+  swap match
+    Some => [ call Some ]
+    None => [ drop None ]
+  end ;
+
+: and-then ( Option(A) [A -- Option(B)] -- Option(B) )
+  # Chain Option-returning operations (flatMap / bind)
+  #
+  # Example:
+  #   Some(5) [ dup 10 < [ Some ] [ drop None ] if ] and-then
+  #   # Returns Some(5) because 5 < 10
+  swap match
+    Some => [ call ]
+    None => [ drop None ]
+  end ;
+
+: filter-option ( Option(A) [A -- Bool] -- Option(A) )
+  # Keep value only if it satisfies predicate
+  #
+  # Example:
+  #   Some(5) [ 10 < ] filter-option  # Stack: Some(5)
+  #   Some(15) [ 10 < ] filter-option # Stack: None
+  swap match
+    Some => [
+      dup rot call
+      [ Some ] [ drop None ] if
+    ]
+    None => [ drop None ]
+  end ;
+
+: option-or ( Option(A) Option(A) -- Option(A) )
+  # Return first Option if Some, otherwise second
+  #
+  # Example:
+  #   Some(5) Some(10) option-or  # Stack: Some(5)
+  #   None Some(10) option-or     # Stack: Some(10)
+  over is-some
+  [ swap drop ]
+  [ drop ]
+  if ;
+
+: flatten-option ( Option(Option(A)) -- Option(A) )
+  # Flatten nested Option
+  #
+  # Example:
+  #   Some(Some(42)) flatten-option  # Stack: Some(42)
+  #   Some(None) flatten-option      # Stack: None
+  match
+    Some => [ ]
+    None => [ None ]
+  end ;
+
+# ============================================================================
+# RESULT UTILITIES
+# ============================================================================
+
+# NOTE: Result type and constructors (Ok, Err) are built into the compiler
+
+: is-ok ( Result(T,E) -- Bool )
+  # Check if Result is Ok
+  #
+  # Example:
+  #   Ok(42) is-ok   # Stack: true
+  #   Err("failed") is-ok  # Stack: false
+  match
+    Ok => [ drop true ]
+    Err => [ drop false ]
+  end ;
+
+: is-err ( Result(T,E) -- Bool )
+  # Check if Result is Err
+  is-ok not ;
+
+: unwrap-result ( Result(T,E) -- T )
+  # Extract value from Result, panic if Err
+  # UNSAFE: Only use when certain Result is Ok
+  match
+    Ok => [ ]
+    Err => [ "unwrap called on Err: " swap concat panic ]
+  end ;
+
+: unwrap-err ( Result(T,E) -- E )
+  # Extract error from Result, panic if Ok
+  # UNSAFE: Only use when certain Result is Err
+  match
+    Ok => [ "unwrap-err called on Ok" panic ]
+    Err => [ ]
+  end ;
+
+: unwrap-or-result ( Result(T,E) T -- T )
+  # Extract value from Result, or use default if Err
+  swap match
+    Ok => [ swap drop ]
+    Err => [ drop ]
+  end ;
+
+: expect-result ( Result(T,E) String -- T )
+  # Extract value from Result, panic with message if Err
+  swap match
+    Ok => [ drop ]
+    Err => [ swap concat panic ]
+  end ;
+
+: map-ok ( Result(T,E) [T -- U] -- Result(U,E) )
+  # Apply function to Ok value, leave Err unchanged
+  #
+  # Example:
+  #   Ok(5) [ 2 * ] map-ok   # Stack: Ok(10)
+  #   Err("bad") [ 2 * ] map-ok  # Stack: Err("bad")
+  swap match
+    Ok => [ call Ok ]
+    Err => [ drop Err ]
+  end ;
+
+: map-err ( Result(T,E) [E -- F] -- Result(T,F) )
+  # Apply function to Err value, leave Ok unchanged
+  swap match
+    Ok => [ drop Ok ]
+    Err => [ call Err ]
+  end ;
+
+: and-then-result ( Result(T,E) [T -- Result(U,E)] -- Result(U,E) )
+  # Chain Result-returning operations (flatMap / bind)
+  #
+  # Example:
+  #   Ok(5) [ dup 0 > [ Ok ] [ drop Err("negative") ] if ] and-then-result
+  swap match
+    Ok => [ call ]
+    Err => [ drop Err ]
+  end ;
+
+: or-else-result ( Result(T,E) [E -- Result(T,F)] -- Result(T,F) )
+  # Chain on error path
+  swap match
+    Ok => [ drop Ok ]
+    Err => [ call ]
+  end ;
+
+: result-or ( Result(T,E) Result(T,E) -- Result(T,E) )
+  # Return first Result if Ok, otherwise second
+  over is-ok
+  [ swap drop ]
+  [ drop ]
+  if ;
+
+# ============================================================================
+# BIND OPERATOR (for chaining operations)
+# ============================================================================
+
+: bind ( Option(A) [A -- Option(B)] -- Option(B) )
+  # Alias for and-then, clearer for chaining
+  and-then ;
+
+: bind-result ( Result(T,E) [T -- Result(U,E)] -- Result(U,E) )
+  # Alias for and-then-result, clearer for chaining
+  and-then-result ;
+
+# ============================================================================
+# CONVERSION UTILITIES
+# ============================================================================
+
+: option-to-result ( Option(A) E -- Result(A,E) )
+  # Convert Option to Result, using provided error
+  #
+  # Example:
+  #   Some(42) "missing value" option-to-result  # Stack: Ok(42)
+  #   None "missing value" option-to-result      # Stack: Err("missing value")
+  swap match
+    Some => [ drop Ok ]
+    None => [ Err ]
+  end ;
+
+: result-to-option ( Result(T,E) -- Option(T) )
+  # Convert Result to Option, discarding error
+  #
+  # Example:
+  #   Ok(42) result-to-option     # Stack: Some(42)
+  #   Err("bad") result-to-option # Stack: None
+  match
+    Ok => [ Some ]
+    Err => [ drop None ]
+  end ;
+
+# ============================================================================
+# LIST BASICS (more in data/list.cem)
+# ============================================================================
+
+# NOTE: List type and constructors (Cons, Nil) are built into the compiler
+
+: is-empty ( List(A) -- Bool )
+  # Check if list is empty
+  match
+    Nil => [ true ]
+    Cons => [ drop drop false ]
+  end ;
+
+: head ( List(A) -- Option(A) )
+  # Get first element of list
+  #
+  # Example:
+  #   Cons(1, Cons(2, Nil)) head  # Stack: Some(1)
+  #   Nil head                    # Stack: None
+  match
+    Nil => [ None ]
+    Cons => [ drop Some ]
+  end ;
+
+: tail ( List(A) -- Option(List(A)) )
+  # Get list without first element
+  match
+    Nil => [ None ]
+    Cons => [ swap drop Some ]
+  end ;
+
+: length ( List(A) -- Int )
+  # Get length of list
+  0 swap [ drop 1 + ] fold ;
+
+: map ( List(A) [A -- B] -- List(B) )
+  # Apply function to each element
+  #
+  # Example:
+  #   Cons(1, Cons(2, Nil)) [ 2 * ] map  # Stack: Cons(2, Cons(4, Nil))
+  swap match
+    Nil => [ drop Nil ]
+    Cons => [
+      [ dup ] dip
+      [ [ dip ] dip ] dip
+      map
+      Cons
+    ]
+  end ;
+
+: filter ( List(A) [A -- Bool] -- List(A) )
+  # Keep only elements that satisfy predicate
+  #
+  # Example:
+  #   Cons(1, Cons(2, Cons(3, Nil))) [ 2 < ] filter
+  #   # Stack: Cons(1, Nil)
+  swap match
+    Nil => [ drop Nil ]
+    Cons => [
+      [ dup ] dip
+      [ [ dip ] dip ] dip
+      [ filter Cons ]
+      [ drop filter ]
+      if
+    ]
+  end ;
+
+: fold ( List(A) B [B A -- B] -- B )
+  # Reduce list to single value
+  #
+  # Example:
+  #   Cons(1, Cons(2, Cons(3, Nil))) 0 [ + ] fold  # Stack: 6
+  swap match
+    Nil => [ drop ]
+    Cons => [
+      [ swap ] dip
+      [ [ dip ] dip ] dip
+      fold
+    ]
+  end ;
+
+# ============================================================================
+# COMMON PATTERNS
+# ============================================================================
+
+: panic ( String -- )
+  # Abort program with error message
+  # TODO: Needs runtime support
+  # For now, this is a placeholder
+  drop ;
+
+: todo ( String -- A )
+  # Mark unimplemented code
+  # Panics with "TODO: " message
+  "TODO: " swap concat panic ;
+
+: unreachable ( String -- A )
+  # Mark code that should never execute
+  # Panics with "UNREACHABLE: " message
+  "UNREACHABLE: " swap concat panic ;
+
+# ============================================================================
+# DEBUGGING UTILITIES
+# ============================================================================
+
+: debug-print ( A -- A )
+  # Print value for debugging, keep it on stack
+  # TODO: Needs runtime support for generic printing
+  dup print ;
+
+: debug-stack ( A -- A )
+  # Print current stack depth
+  # TODO: Needs runtime introspection
+  dup "Stack depth: " print ;
+
+# ============================================================================
+# EXAMPLES
+# ============================================================================
+
+# Example 1: Chaining Option operations
+# : parse-and-double ( String -- Option(Int) )
+#   parse-int                    # String -- Option(Int)
+#   [ 2 * ] map-option           # Option(Int) -- Option(Int)
+#   [ 100 < ] filter-option ;    # Option(Int) -- Option(Int)
+
+# Example 2: Chaining Result operations
+# : safe-divide ( Int Int -- Result(Int, String) )
+#   dup 0 =
+#   [ drop drop Err("division by zero") ]
+#   [ / Ok ]
+#   if ;
+#
+# : compute ( Int Int -- Result(Int, String) )
+#   safe-divide
+#   [ 10 + ] map-ok
+#   [ "Error: " swap concat ] map-err ;
+
+# Example 3: Using bind for clean chaining
+# : process-user ( String -- Result(User, Error) )
+#   parse-user          # Result(RawUser, Error)
+#   [ validate ] bind-result
+#   [ normalize ] bind-result
+#   [ save ] bind-result ;
+
+# Example 4: Converting between Option and Result
+# : get-config ( String -- Result(String, String) )
+#   lookup-env-var              # String -- Option(String)
+#   "env var not set" option-to-result ;
+
+# End of prelude.cem
