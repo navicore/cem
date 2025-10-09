@@ -1,0 +1,255 @@
+# prelude_test.cem - Tests for prelude.cem utilities
+#
+# These tests validate Option, Result, and List utilities.
+# Run with: cem test stdlib/prelude_test.cem
+
+# ============================================================================
+# TEST FRAMEWORK (minimal)
+# ============================================================================
+
+: assert-eq ( A A String -- )
+  # Assert two values are equal
+  rot rot = not
+  [ "Assertion failed: " swap concat panic ]
+  [ drop ]
+  if ;
+
+: assert-true ( Bool String -- )
+  # Assert value is true
+  swap not
+  [ "Assertion failed: " swap concat panic ]
+  [ drop ]
+  if ;
+
+# ============================================================================
+# OPTION TESTS
+# ============================================================================
+
+: test-is-some ( -- )
+  Some(42) is-some true = "Some should be is-some" assert-true
+  None is-some false = "None should not be is-some" assert-true ;
+
+: test-is-none ( -- )
+  None is-none true = "None should be is-none" assert-true
+  Some(42) is-none false = "Some should not be is-none" assert-true ;
+
+: test-unwrap-or-some ( -- )
+  Some(42) 0 unwrap-or 42 = "unwrap-or Some should return value" assert-true ;
+
+: test-unwrap-or-none ( -- )
+  None 99 unwrap-or 99 = "unwrap-or None should return default" assert-true ;
+
+: test-map-option-some ( -- )
+  Some(5) [ 2 * ] map-option
+  # Should be Some(10)
+  dup is-some true = "map-option Some should return Some" assert-true
+  10 unwrap-or 10 = "map-option Some should transform value" assert-true ;
+
+: test-map-option-none ( -- )
+  None [ 2 * ] map-option
+  is-none true = "map-option None should return None" assert-true ;
+
+: test-and-then-some ( -- )
+  # Chain: Some(5) -> check if < 10 -> Some(5)
+  Some(5) [ dup 10 < [ Some ] [ drop None ] if ] and-then
+  is-some true = "and-then with passing predicate" assert-true ;
+
+: test-and-then-none ( -- )
+  None [ dup 10 < [ Some ] [ drop None ] if ] and-then
+  is-none true = "and-then None should return None" assert-true ;
+
+: test-filter-option-pass ( -- )
+  Some(5) [ 10 < ] filter-option
+  is-some true = "filter-option should keep passing value" assert-true ;
+
+: test-filter-option-fail ( -- )
+  Some(15) [ 10 < ] filter-option
+  is-none true = "filter-option should reject failing value" assert-true ;
+
+: test-option-or-first ( -- )
+  Some(5) Some(10) option-or
+  10 unwrap-or 5 = "option-or should prefer first Some" assert-true ;
+
+: test-option-or-second ( -- )
+  None Some(10) option-or
+  0 unwrap-or 10 = "option-or should fallback to second" assert-true ;
+
+# ============================================================================
+# RESULT TESTS
+# ============================================================================
+
+: test-is-ok ( -- )
+  Ok(42) is-ok true = "Ok should be is-ok" assert-true
+  Err("bad") is-ok false = "Err should not be is-ok" assert-true ;
+
+: test-is-err ( -- )
+  Err("bad") is-err true = "Err should be is-err" assert-true
+  Ok(42) is-err false = "Ok should not be is-err" assert-true ;
+
+: test-unwrap-or-result-ok ( -- )
+  Ok(42) 0 unwrap-or-result 42 = "unwrap-or-result Ok" assert-true ;
+
+: test-unwrap-or-result-err ( -- )
+  Err("bad") 99 unwrap-or-result 99 = "unwrap-or-result Err" assert-true ;
+
+: test-map-ok-ok ( -- )
+  Ok(5) [ 2 * ] map-ok
+  dup is-ok true = "map-ok Ok should return Ok" assert-true
+  0 unwrap-or-result 10 = "map-ok Ok should transform value" assert-true ;
+
+: test-map-ok-err ( -- )
+  Err("bad") [ 2 * ] map-ok
+  is-err true = "map-ok Err should return Err" assert-true ;
+
+: test-map-err-ok ( -- )
+  Ok(42) [ "ERROR: " swap concat ] map-err
+  is-ok true = "map-err Ok should return Ok" assert-true ;
+
+: test-map-err-err ( -- )
+  Err("bad") [ "ERROR: " swap concat ] map-err
+  # Should be Err("ERROR: bad")
+  is-err true = "map-err Err should return Err" assert-true ;
+
+: test-bind-result-ok ( -- )
+  Ok(5) [ dup 0 > [ Ok ] [ drop Err("negative") ] if ] bind-result
+  is-ok true = "bind-result Ok with passing predicate" assert-true ;
+
+: test-bind-result-err ( -- )
+  Err("bad") [ dup 0 > [ Ok ] [ drop Err("negative") ] if ] bind-result
+  is-err true = "bind-result Err should propagate" assert-true ;
+
+# ============================================================================
+# CONVERSION TESTS
+# ============================================================================
+
+: test-option-to-result-some ( -- )
+  Some(42) "missing" option-to-result
+  is-ok true = "option-to-result Some should be Ok" assert-true ;
+
+: test-option-to-result-none ( -- )
+  None "missing" option-to-result
+  is-err true = "option-to-result None should be Err" assert-true ;
+
+: test-result-to-option-ok ( -- )
+  Ok(42) result-to-option
+  is-some true = "result-to-option Ok should be Some" assert-true ;
+
+: test-result-to-option-err ( -- )
+  Err("bad") result-to-option
+  is-none true = "result-to-option Err should be None" assert-true ;
+
+# ============================================================================
+# LIST TESTS
+# ============================================================================
+
+: test-is-empty-nil ( -- )
+  Nil is-empty true = "Nil should be empty" assert-true ;
+
+: test-is-empty-cons ( -- )
+  Cons(1, Nil) is-empty false = "Cons should not be empty" assert-true ;
+
+: test-head-cons ( -- )
+  Cons(42, Nil) head
+  is-some true = "head of Cons should be Some" assert-true ;
+
+: test-head-nil ( -- )
+  Nil head
+  is-none true = "head of Nil should be None" assert-true ;
+
+: test-tail-cons ( -- )
+  Cons(1, Cons(2, Nil)) tail
+  is-some true = "tail of Cons should be Some" assert-true ;
+
+: test-tail-nil ( -- )
+  Nil tail
+  is-none true = "tail of Nil should be None" assert-true ;
+
+: test-length-nil ( -- )
+  Nil length 0 = "length of Nil" assert-true ;
+
+: test-length-cons ( -- )
+  Cons(1, Cons(2, Cons(3, Nil))) length
+  3 = "length of 3-element list" assert-true ;
+
+: test-map-list ( -- )
+  # [1, 2, 3] map (*2) -> [2, 4, 6]
+  Cons(1, Cons(2, Cons(3, Nil))) [ 2 * ] map
+  # Verify it's still a list with same length
+  length 3 = "map should preserve list length" assert-true ;
+
+: test-filter-list ( -- )
+  # [1, 2, 3, 4, 5] filter (< 3) -> [1, 2]
+  Cons(1, Cons(2, Cons(3, Cons(4, Cons(5, Nil)))))
+  [ 3 < ] filter
+  length 2 = "filter should remove non-matching elements" assert-true ;
+
+: test-fold-sum ( -- )
+  # [1, 2, 3, 4] fold(0, +) -> 10
+  Cons(1, Cons(2, Cons(3, Cons(4, Nil))))
+  0 [ + ] fold
+  10 = "fold should sum list" assert-true ;
+
+: test-fold-product ( -- )
+  # [2, 3, 4] fold(1, *) -> 24
+  Cons(2, Cons(3, Cons(4, Nil)))
+  1 [ * ] fold
+  24 = "fold should compute product" assert-true ;
+
+# ============================================================================
+# RUN ALL TESTS
+# ============================================================================
+
+: run-all-tests ( -- )
+  "Running prelude.cem tests..." println
+
+  # Option tests
+  test-is-some
+  test-is-none
+  test-unwrap-or-some
+  test-unwrap-or-none
+  test-map-option-some
+  test-map-option-none
+  test-and-then-some
+  test-and-then-none
+  test-filter-option-pass
+  test-filter-option-fail
+  test-option-or-first
+  test-option-or-second
+
+  # Result tests
+  test-is-ok
+  test-is-err
+  test-unwrap-or-result-ok
+  test-unwrap-or-result-err
+  test-map-ok-ok
+  test-map-ok-err
+  test-map-err-ok
+  test-map-err-err
+  test-bind-result-ok
+  test-bind-result-err
+
+  # Conversion tests
+  test-option-to-result-some
+  test-option-to-result-none
+  test-result-to-option-ok
+  test-result-to-option-err
+
+  # List tests
+  test-is-empty-nil
+  test-is-empty-cons
+  test-head-cons
+  test-head-nil
+  test-tail-cons
+  test-tail-nil
+  test-length-nil
+  test-length-cons
+  test-map-list
+  test-filter-list
+  test-fold-sum
+  test-fold-product
+
+  "All prelude.cem tests passed!" println ;
+
+# Entry point
+: main ( -- )
+  run-all-tests ;

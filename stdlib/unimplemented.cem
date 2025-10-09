@@ -1,0 +1,166 @@
+# unimplemented.cem - Combinators Requiring Compiler Support
+#
+# These combinators are part of the standard library design but cannot be
+# implemented yet because they require features not yet available in the
+# compiler. They are documented here for reference and future implementation.
+#
+# This file should NOT be imported or used in actual programs.
+# It exists purely for documentation purposes.
+
+# ============================================================================
+# QUOTATION MANIPULATION COMBINATORS
+# ============================================================================
+
+: concat ( [A] [B] -- [A B] )
+  # Concatenate two quotations
+  # Creates a new quotation that executes both in sequence
+  #
+  # Example:
+  #   [ 1 2 ] [ 3 4 ] concat  # Stack: [ 1 2 3 4 ]
+  #
+  # Requirements:
+  # - Compiler support for quotation concatenation
+  # - Or macro system to rewrite quotations at compile time
+  #
+  # Implementation Strategy:
+  # 1. Compiler intrinsic: __builtin_concat
+  # 2. Macro expansion: [ A ] [ B ] concat → [ A B ]
+  # 3. FFI to Rust: Create Vec<Instruction> and merge
+  #
+  # TODO: Implement as compiler intrinsic
+  ;
+
+: curry ( A [A B -- C] -- [B -- C] )
+  # Partial application: bind first argument
+  # Returns a new quotation with A captured
+  #
+  # Example:
+  #   5 [ + ] curry  # Stack: [ 5 + ] (conceptually)
+  #   3 call         # Stack: 8
+  #
+  # Requirements:
+  # - Closure support (capture environment)
+  # - Quotations must be able to close over values
+  #
+  # Implementation Strategy:
+  # 1. Create closure struct { captured_value: A, quotation: [B -- C] }
+  # 2. When called, push captured_value then execute quotation
+  # 3. Requires heap allocation for closure
+  #
+  # TODO: Implement with closure support
+  ;
+
+: compose ( [A -- B] [B -- C] -- [A -- C] )
+  # Function composition: create pipeline
+  # Returns quotation that applies first then second
+  #
+  # Example:
+  #   [ 2 * ] [ 1 + ] compose  # Stack: [ 2 * 1 + ]
+  #   5 call                   # Stack: 11 (5 * 2 + 1)
+  #
+  # Requirements:
+  # - Quotation concatenation (same as concat)
+  #
+  # Implementation Strategy:
+  # 1. If concat exists: just use concat!
+  # 2. Otherwise, compiler intrinsic __builtin_compose
+  #
+  # TODO: Implement via concat or compiler intrinsic
+  ;
+
+: flip ( [A B -- C] -- [B A -- C] )
+  # Swap argument order of quotation
+  # Returns new quotation that swaps top two stack items before execution
+  #
+  # Example:
+  #   [ - ] flip  # Stack: [ swap - ]
+  #   10 3 call   # Stack: -7 (instead of 7)
+  #
+  # Requirements:
+  # - Quotation manipulation (prepend swap instruction)
+  #
+  # Implementation Strategy:
+  # 1. If concat exists: [ swap ] swap concat
+  # 2. Compiler intrinsic: __builtin_flip
+  # 3. Macro expansion
+  #
+  # TODO: Implement via quotation manipulation
+  ;
+
+: const ( A -- [-- A] )
+  # Create quotation that always returns A
+  # Captures value in closure
+  #
+  # Example:
+  #   42 const  # Stack: [ 42 ] (conceptually)
+  #   call      # Stack: 42
+  #
+  # Requirements:
+  # - Closure support (same as curry)
+  # - Quotations must capture values
+  #
+  # Implementation Strategy:
+  # 1. Create closure { captured_value: A }
+  # 2. When called, push captured_value
+  # 3. Requires heap allocation
+  #
+  # TODO: Implement with closure support
+  ;
+
+# ============================================================================
+# IMPLEMENTATION ROADMAP
+# ============================================================================
+
+# Phase 1: Compiler Intrinsics (Easiest)
+# - Add __builtin_concat for quotation concatenation
+# - This enables: concat, compose
+#
+# Phase 2: Closure Support (Harder)
+# - Add environment capture to quotations
+# - This enables: curry, const
+# - Requires: Heap allocation, closure structs
+#
+# Phase 3: Quotation Rewriting (Advanced)
+# - Add ability to manipulate quotations at runtime
+# - This enables: flip, and more advanced metaprogramming
+# - May require: Quotation as first-class AST nodes
+
+# ============================================================================
+# ALTERNATIVE: UNTIL COMBINATOR
+# ============================================================================
+
+: until ( [-- Bool] [-- ] -- )
+  # Execute body until condition is true
+  # Opposite of while
+  #
+  # Requirements:
+  # - Depends on concat to negate condition: [ not ] concat swap while
+  #
+  # Alternative implementation without concat:
+  # Could be implemented by duplicating while logic with inverted condition
+  # But that violates DRY principle
+  #
+  # TODO: Implement when concat is available
+  ;
+
+# ============================================================================
+# NOTES
+# ============================================================================
+
+# Why These Aren't Implemented Yet:
+# 1. Focus on getting core language working first
+# 2. These require non-trivial compiler changes
+# 3. Can still write useful programs without them
+# 4. Will add when language matures
+
+# When to Implement:
+# - After LLVM backend is complete
+# - After stdlib has FFI support
+# - After core functionality is stable
+# - When users need them for real programs
+
+# How to Test:
+# - Each combinator should have property-based tests
+# - Test composition laws (associativity, etc.)
+# - Test closure capture semantics
+# - Verify no memory leaks with closures
