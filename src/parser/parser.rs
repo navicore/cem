@@ -20,16 +20,23 @@ impl fmt::Display for ParseError {
 
 impl std::error::Error for ParseError {}
 
+const MAX_NESTING_DEPTH: usize = 100;
+
 pub struct Parser {
     tokens: Vec<Token>,
     current: usize,
+    nesting_depth: usize,
 }
 
 impl Parser {
     pub fn new(input: &str) -> Self {
         let mut lexer = Lexer::new(input);
         let tokens = lexer.tokenize();
-        Parser { tokens, current: 0 }
+        Parser {
+            tokens,
+            current: 0,
+            nesting_depth: 0,
+        }
     }
 
     pub fn parse(&mut self) -> Result<Program, ParseError> {
@@ -150,6 +157,13 @@ impl Parser {
     }
 
     fn parse_type(&mut self) -> Result<Type, ParseError> {
+        self.enter_nesting()?;
+        let result = self.parse_type_inner();
+        self.exit_nesting();
+        result
+    }
+
+    fn parse_type_inner(&mut self) -> Result<Type, ParseError> {
         let name = self.consume_ident("Expected type name")?;
 
         match name.as_str() {
@@ -158,9 +172,11 @@ impl Parser {
             "String" => Ok(Type::String),
             _ => {
                 // Check if it's a generic type variable (single uppercase letter or starts with lowercase)
-                if name.len() == 1 && name.chars().next().unwrap().is_uppercase() {
+                let first_char = name.chars().next();
+
+                if name.len() == 1 && first_char.map_or(false, |c| c.is_uppercase()) {
                     Ok(Type::Var(name))
-                } else if name.chars().next().unwrap().is_lowercase() {
+                } else if first_char.map_or(false, |c| c.is_lowercase()) {
                     Ok(Type::Var(name))
                 } else {
                     // Named type, possibly with type arguments
@@ -186,6 +202,13 @@ impl Parser {
     }
 
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
+        self.enter_nesting()?;
+        let result = self.parse_expr_inner();
+        self.exit_nesting();
+        result
+    }
+
+    fn parse_expr_inner(&mut self) -> Result<Expr, ParseError> {
         let token = self.peek();
 
         match &token.kind {
@@ -378,6 +401,23 @@ impl Parser {
             column: token.column,
         }
     }
+
+    fn enter_nesting(&mut self) -> Result<(), ParseError> {
+        self.nesting_depth += 1;
+        if self.nesting_depth > MAX_NESTING_DEPTH {
+            Err(ParseError {
+                message: format!("Maximum nesting depth of {} exceeded", MAX_NESTING_DEPTH),
+                line: self.peek().line,
+                column: self.peek().column,
+            })
+        } else {
+            Ok(())
+        }
+    }
+
+    fn exit_nesting(&mut self) {
+        self.nesting_depth = self.nesting_depth.saturating_sub(1);
+    }
 }
 
 #[cfg(test)]
@@ -431,5 +471,27 @@ mod tests {
             Expr::Quotation(exprs) => assert_eq!(exprs.len(), 3),
             _ => panic!("Expected Quotation"),
         }
+    }
+
+    #[test]
+    fn test_recursion_depth_limit() {
+        // Create deeply nested quotations that exceed MAX_NESTING_DEPTH
+        let mut input = String::from(": test ( -- ) ");
+        for _ in 0..105 {
+            input.push_str("[ ");
+        }
+        input.push_str("42 ");
+        for _ in 0..105 {
+            input.push_str("] ");
+        }
+        input.push_str(";");
+
+        let mut parser = Parser::new(&input);
+        let result = parser.parse();
+
+        // Should fail with nesting depth error
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.message.contains("nesting depth"));
     }
 }
