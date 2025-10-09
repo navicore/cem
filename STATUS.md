@@ -1,10 +1,11 @@
 # Cem Development Status
 
-*Last updated: 2025-10-08*
+*Last updated: 2025-10-08 (Session 2)*
 
 ## What We've Built
 
 ### Phase 1, Week 1-2: Core Type System ✅
+### Phase 1, Week 2: Minimal Parser ✅
 
 We've successfully implemented the foundational type checking system for Cem!
 
@@ -64,16 +65,37 @@ We've successfully implemented the foundational type checking system for Cem!
 - Linear type violations
 - Unification errors
 
+**7. Parser Module (`src/parser/`)** ✅
+- Hand-written lexer with full tokenization
+- Recursive descent parser
+- Support for:
+  - Type definitions
+  - Word definitions with effect signatures
+  - Literals (Int, Bool, String)
+  - Quotations
+  - Pattern matching
+  - Control flow (if, while)
+  - Comments
+- **Tests passing**: 15/15 (lexer + parser)
+
+**8. Integration Tests (`tests/integration_test.rs`)** ✅
+- End-to-end: parse → type-check
+- Multiple complete programs tested
+- Error detection verified
+- **Tests passing**: 8/8
+
 ### Overall Test Results
 
 ```
-running 14 tests
+running 29 tests (14 lib + 15 parser + 8 integration)
 ✅ All tests passing
 ```
 
 ## What Works Right Now
 
-You can already type-check Cem programs! For example:
+**You can now parse AND type-check complete Cem programs!**
+
+Example programs that work end-to-end:
 
 ```cem
 # This would type-check successfully:
@@ -98,15 +120,26 @@ You can already type-check Cem programs! For example:
 # Result: (Int -- Int Int) ✓
 ```
 
+## Parser Features
+
+The parser handles:
+- **Comments**: `# comment to end of line`
+- **Type definitions**: `type Option (T) | Some(T) | None`
+- **Word definitions**: `: word-name ( effect ) body ;`
+- **Literals**: `42`, `true`, `"hello"`
+- **Quotations**: `[ code block ]`
+- **Pattern matching**: `match Variant => [ body ] end`
+- **Operators**: `+`, `-`, `*`, `/`, `<`, `>`, `=`, etc.
+- **Control flow**: `if [ then ] [ else ]`, `while [ cond ] [ body ]`
+
 ## What's Next
 
-### Immediate (This Week)
+### Immediate (Next Session)
 
-- [ ] Create minimal parser
-  - Can parse enough to test type checker end-to-end
-  - S-expression syntax is fine for now
-- [ ] Add more test cases from EXAMPLES.md
-- [ ] Test pattern matching exhaustiveness
+- [ ] Fix `if` semantics (should pop quotations from stack)
+- [ ] Add more complex examples
+- [ ] Test linear type checking with String
+- [ ] Improve error messages with source locations
 
 ### Phase 1, Week 3-4 (Linear Types)
 
@@ -201,7 +234,7 @@ src/
 
 ## Current Limitations
 
-- No parser yet (can't parse source files)
+- ~~No parser yet (can't parse source files)~~ ✅ Parser complete!
 - Quotation effects are opaque (not inferred)
 - No closures (quotations can't capture)
 - No user-defined ADTs yet (only built-ins)
@@ -210,10 +243,12 @@ src/
 
 ## Next Session Goals
 
-1. Build a minimal parser (even if just s-expressions)
-2. Test end-to-end: parse → type-check → report
+1. ~~Build a minimal parser (even if just s-expressions)~~ ✅ Complete!
+2. ~~Test end-to-end: parse → type-check → report~~ ✅ Complete!
 3. Add more examples from EXAMPLES.md
 4. Start thinking about LLVM backend
+5. Improve error messages with line/column info
+6. Test linear type enforcement with real examples
 
 ## Notes
 
