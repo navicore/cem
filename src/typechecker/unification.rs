@@ -1,7 +1,8 @@
-/// Type unification for Cem
-///
-/// Implements unification of types and stack types for polymorphic type checking.
+/**
+Type unification for Cem
 
+Implements unification of types and stack types for polymorphic type checking.
+*/
 use crate::ast::types::{StackType, Type};
 use crate::typechecker::errors::{TypeError, TypeResult};
 use std::collections::HashMap;
@@ -19,11 +20,7 @@ pub fn unify_types(ty1: &Type, ty2: &Type) -> TypeResult<Substitution> {
     Ok(subst)
 }
 
-fn unify_types_with_subst(
-    ty1: &Type,
-    ty2: &Type,
-    subst: &mut Substitution,
-) -> TypeResult<()> {
+fn unify_types_with_subst(ty1: &Type, ty2: &Type, subst: &mut Substitution) -> TypeResult<()> {
     match (ty1, ty2) {
         // Same primitive types unify
         (Type::Int, Type::Int) => Ok(()),
@@ -43,10 +40,7 @@ fn unify_types_with_subst(
         }
 
         // Named types (ADTs) must have same name and compatible args
-        (
-            Type::Named { name: n1, args: a1 },
-            Type::Named { name: n2, args: a2 },
-        ) => {
+        (Type::Named { name: n1, args: a1 }, Type::Named { name: n2, args: a2 }) => {
             if n1 != n2 {
                 return Err(TypeError::UnificationError {
                     ty1: ty1.clone(),
@@ -111,10 +105,7 @@ fn unify_stack_types_with_subst(
         (StackType::Empty, StackType::Empty) => Ok(()),
 
         // Cons cells: unify tops and rests
-        (
-            StackType::Cons { rest: r1, top: t1 },
-            StackType::Cons { rest: r2, top: t2 },
-        ) => {
+        (StackType::Cons { rest: r1, top: t1 }, StackType::Cons { rest: r2, top: t2 }) => {
             // Unify the top types
             unify_types_with_subst(t1, t2, type_subst)?;
 

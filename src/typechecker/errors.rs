@@ -1,5 +1,6 @@
-/// Type checking errors for Cem
-
+/**
+Type checking errors for Cem
+*/
 use crate::ast::types::{Effect, StackType, Type};
 use std::fmt;
 
@@ -29,14 +30,10 @@ pub enum TypeError {
     },
 
     /// Undefined word reference
-    UndefinedWord {
-        name: String,
-    },
+    UndefinedWord { name: String },
 
     /// Undefined type reference
-    UndefinedType {
-        name: String,
-    },
+    UndefinedType { name: String },
 
     /// Non-exhaustive pattern match
     NonExhaustiveMatch {
@@ -53,15 +50,10 @@ pub enum TypeError {
     },
 
     /// Attempt to duplicate non-Copy type
-    CannotDuplicate {
-        ty: Type,
-        operation: String,
-    },
+    CannotDuplicate { ty: Type, operation: String },
 
     /// Use of value after move (linear type violation)
-    UseAfterMove {
-        var: String,
-    },
+    UseAfterMove { var: String },
 
     /// Cannot unify types (for polymorphism)
     UnificationError {
@@ -78,9 +70,7 @@ pub enum TypeError {
     },
 
     /// Generic error
-    Other {
-        message: String,
-    },
+    Other { message: String },
 }
 
 impl fmt::Display for TypeError {
@@ -169,11 +159,7 @@ impl fmt::Display for TypeError {
             }
 
             TypeError::UnificationError { ty1, ty2, reason } => {
-                write!(
-                    f,
-                    "Cannot unify types {} and {}: {}",
-                    ty1, ty2, reason
-                )
+                write!(f, "Cannot unify types {} and {}: {}", ty1, ty2, reason)
             }
 
             TypeError::StackUnificationError {

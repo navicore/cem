@@ -1,7 +1,8 @@
-/// Type system definitions for Cem
-///
-/// This module defines the representation of types and effects in the Cem type system.
+/**
+Type system definitions for Cem
 
+This module defines the representation of types and effects in the Cem type system.
+*/
 use std::fmt;
 
 /// A type in the Cem type system
@@ -20,10 +21,7 @@ pub enum Type {
     Var(String),
 
     /// Named type (user-defined ADT)
-    Named {
-        name: String,
-        args: Vec<Type>,
-    },
+    Named { name: String, args: Vec<Type> },
 
     /// Quotation type (first-class function)
     Quotation(Box<Effect>),
@@ -50,10 +48,7 @@ pub enum StackType {
     Empty,
 
     /// Concrete type on top of another stack
-    Cons {
-        rest: Box<StackType>,
-        top: Type,
-    },
+    Cons { rest: Box<StackType>, top: Type },
 
     /// Row variable (represents "rest of stack")
     /// Allows polymorphism over unknown stack depths
@@ -142,9 +137,9 @@ impl Type {
         match self {
             Type::Int | Type::Bool => true,
             Type::String => false,
-            Type::Var(_) => false, // Conservative: assume not Copy
+            Type::Var(_) => false,       // Conservative: assume not Copy
             Type::Named { .. } => false, // Conservative: requires trait analysis
-            Type::Quotation(_) => true, // Quotations are Copy (just code pointers for now)
+            Type::Quotation(_) => true,  // Quotations are Copy (just code pointers for now)
         }
     }
 
@@ -207,9 +202,7 @@ mod tests {
 
     #[test]
     fn test_stack_operations() {
-        let stack = StackType::empty()
-            .push(Type::Int)
-            .push(Type::Bool);
+        let stack = StackType::empty().push(Type::Int).push(Type::Bool);
 
         assert_eq!(stack.depth(), Some(2));
 
@@ -227,20 +220,14 @@ mod tests {
         );
 
         // +: (Int Int -- Int)
-        let add = Effect::from_vecs(
-            vec![Type::Int, Type::Int],
-            vec![Type::Int],
-        );
+        let add = Effect::from_vecs(vec![Type::Int, Type::Int], vec![Type::Int]);
 
         // dup then + requires A = Int
         // For now, this will fail (needs unification)
         assert!(Effect::compose(&dup, &add).is_none());
 
         // But concrete Int versions should compose
-        let dup_int = Effect::from_vecs(
-            vec![Type::Int],
-            vec![Type::Int, Type::Int],
-        );
+        let dup_int = Effect::from_vecs(vec![Type::Int], vec![Type::Int, Type::Int]);
         let composed = Effect::compose(&dup_int, &add);
         assert!(composed.is_some());
         let composed = composed.unwrap();

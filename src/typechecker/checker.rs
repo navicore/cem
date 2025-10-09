@@ -1,7 +1,8 @@
-/// Core type checker for Cem
-///
-/// Implements bidirectional type checking with stack effect inference.
+/**
+Core type checker for Cem
 
+Implements bidirectional type checking with stack effect inference.
+*/
 use crate::ast::types::{Effect, StackType, Type};
 use crate::ast::{Expr, MatchBranch, Pattern, Program, WordDef};
 use crate::typechecker::environment::Environment;
@@ -47,12 +48,13 @@ impl TypeChecker {
         }
 
         // Verify final stack matches declared output effect
-        let (_, _) = unify_stack_types(&current_stack, &word.effect.outputs)
-            .map_err(|_| TypeError::EffectMismatch {
+        let (_, _) = unify_stack_types(&current_stack, &word.effect.outputs).map_err(|_| {
+            TypeError::EffectMismatch {
                 expected: word.effect.clone(),
                 actual: Effect::new(word.effect.inputs.clone(), current_stack),
                 word: word.name.clone(),
-            })?;
+            }
+        })?;
 
         // Add word to environment for future lookups
         self.env.add_word(word.name.clone(), word.effect.clone());
@@ -80,11 +82,10 @@ impl TypeChecker {
 
             Expr::WordCall(name) => {
                 // Look up word effect
-                let effect = self.env.lookup_word(name).ok_or_else(|| {
-                    TypeError::UndefinedWord {
-                        name: name.clone(),
-                    }
-                })?;
+                let effect = self
+                    .env
+                    .lookup_word(name)
+                    .ok_or_else(|| TypeError::UndefinedWord { name: name.clone() })?;
 
                 // Apply effect to current stack
                 self.apply_effect(effect, stack, name)
@@ -108,13 +109,12 @@ impl TypeChecker {
                 else_branch,
             } => {
                 // Pop Bool from stack
-                let (stack_after_cond, cond_type) = stack.pop().ok_or_else(|| {
-                    TypeError::StackUnderflow {
+                let (stack_after_cond, cond_type) =
+                    stack.pop().ok_or_else(|| TypeError::StackUnderflow {
                         word: "if".to_string(),
                         required: 1,
                         available: 0,
-                    }
-                })?;
+                    })?;
 
                 // Verify condition is Bool
                 unify_types(&cond_type, &Type::Bool).map_err(|_| TypeError::TypeMismatch {
@@ -128,8 +128,8 @@ impl TypeChecker {
                 let else_stack = self.check_expr(else_branch, stack_after_cond)?;
 
                 // Unify branch results
-                let (_, _) = unify_stack_types(&then_stack, &else_stack)
-                    .map_err(|_| TypeError::Other {
+                let (_, _) =
+                    unify_stack_types(&then_stack, &else_stack).map_err(|_| TypeError::Other {
                         message: "if branches produce incompatible stack effects".to_string(),
                     })?;
 
@@ -143,13 +143,12 @@ impl TypeChecker {
                 let cond_stack = self.check_expr(condition, stack.clone())?;
 
                 // Pop Bool from condition result
-                let (_stack_after_cond, cond_type) = cond_stack.pop().ok_or_else(|| {
-                    TypeError::StackUnderflow {
+                let (_stack_after_cond, cond_type) =
+                    cond_stack.pop().ok_or_else(|| TypeError::StackUnderflow {
                         word: "while".to_string(),
                         required: 1,
                         available: 0,
-                    }
-                })?;
+                    })?;
 
                 unify_types(&cond_type, &Type::Bool).map_err(|_| TypeError::TypeMismatch {
                     expected: Type::Bool,
@@ -159,8 +158,8 @@ impl TypeChecker {
 
                 // Check body maintains stack shape
                 let body_stack = self.check_expr(body, stack.clone())?;
-                let (_, _) = unify_stack_types(&stack, &body_stack)
-                    .map_err(|_| TypeError::Other {
+                let (_, _) =
+                    unify_stack_types(&stack, &body_stack).map_err(|_| TypeError::Other {
                         message: "while body must maintain stack shape".to_string(),
                     })?;
 
@@ -214,14 +213,9 @@ impl TypeChecker {
 
         // Now unify consumed types with effect.inputs
         let consumed_stack = StackType::from_vec(consumed);
-        let (type_subst, _stack_subst) =
-            unify_stack_types(&consumed_stack, &effect.inputs).map_err(|e| {
-                TypeError::Other {
-                    message: format!(
-                        "Cannot apply '{}': input type mismatch: {}",
-                        word_name, e
-                    ),
-                }
+        let (type_subst, _stack_subst) = unify_stack_types(&consumed_stack, &effect.inputs)
+            .map_err(|e| TypeError::Other {
+                message: format!("Cannot apply '{}': input type mismatch: {}", word_name, e),
             })?;
 
         // Apply substitution to outputs
@@ -295,34 +289,30 @@ impl TypeChecker {
         }
 
         // Pop the scrutinee from stack
-        let (stack_after_pop, scrutinee_type) = stack.pop().ok_or_else(|| {
-            TypeError::StackUnderflow {
+        let (stack_after_pop, scrutinee_type) =
+            stack.pop().ok_or_else(|| TypeError::StackUnderflow {
                 word: "match".to_string(),
                 required: 1,
                 available: 0,
-            }
-        })?;
+            })?;
 
         // Get the type name from scrutinee
         let type_name = match &scrutinee_type {
             Type::Named { name, .. } => name.clone(),
             _ => {
                 return Err(TypeError::Other {
-                    message: format!(
-                        "Cannot pattern match on non-ADT type: {}",
-                        scrutinee_type
-                    ),
+                    message: format!("Cannot pattern match on non-ADT type: {}", scrutinee_type),
                 })
             }
         };
 
         // Check exhaustiveness (all variants covered)
-        let variants = self
-            .env
-            .get_variants(&type_name)
-            .ok_or_else(|| TypeError::UndefinedType {
-                name: type_name.clone(),
-            })?;
+        let variants =
+            self.env
+                .get_variants(&type_name)
+                .ok_or_else(|| TypeError::UndefinedType {
+                    name: type_name.clone(),
+                })?;
 
         let covered_variants: Vec<_> = branches
             .iter()

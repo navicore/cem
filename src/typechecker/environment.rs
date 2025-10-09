@@ -1,7 +1,8 @@
-/// Type checking environment for Cem
-///
-/// Maintains symbol tables for words, types, and type variables during type checking.
+/**
+Type checking environment for Cem
 
+Maintains symbol tables for words, types, and type variables during type checking.
+*/
 use crate::ast::types::{Effect, Type};
 use crate::ast::{TypeDef, Variant};
 use std::collections::HashMap;

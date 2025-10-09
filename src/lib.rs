@@ -6,10 +6,9 @@
 /// - Type checker with effect inference
 /// - Pattern matching exhaustiveness checking
 /// - LLVM code generation (future)
-
 pub mod ast;
-pub mod typechecker;
 pub mod parser;
+pub mod typechecker;
 
-pub use ast::{Program, WordDef, TypeDef, Expr};
-pub use ast::types::{Type, Effect, StackType};
+pub use ast::types::{Effect, StackType, Type};
+pub use ast::{Expr, Program, TypeDef, WordDef};

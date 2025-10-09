@@ -1,7 +1,8 @@
-/// Abstract Syntax Tree definitions for Cem
-///
-/// This module defines the core AST types representing Cem programs.
+/**
+Abstract Syntax Tree definitions for Cem
 
+This module defines the core AST types representing Cem programs.
+*/
 pub mod types;
 
 use std::fmt;
@@ -55,9 +56,7 @@ pub enum Expr {
     Quotation(Vec<Expr>),
 
     /// Pattern match expression
-    Match {
-        branches: Vec<MatchBranch>,
-    },
+    Match { branches: Vec<MatchBranch> },
 
     /// If expression (condition is top of stack)
     If {
