@@ -1,6 +1,6 @@
 /// Recursive descent parser for Cem
 
-use crate::ast::types::{Effect, StackType, Type};
+use crate::ast::types::{Effect, Type};
 use crate::ast::{Expr, MatchBranch, Pattern, Program, TypeDef, Variant, WordDef};
 use crate::parser::lexer::{Lexer, Token, TokenKind};
 use std::fmt;

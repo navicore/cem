@@ -4,3 +4,5 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+# Using inkwell with LLVM 18 (stable and well-supported)
+inkwell = { version = "0.5", features = ["llvm18-0"] }
