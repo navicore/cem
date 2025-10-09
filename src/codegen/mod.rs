@@ -80,7 +80,11 @@ Phase 4: Pattern matching (patterns.rs)
 Phase 5: Optimization passes (optimize.rs)
 */
 
+pub mod error;
 pub mod primitives;
+pub mod runtime;
+
+pub use error::{CodegenError, CodegenResult};
 
 use crate::ast::{Expr, Program, WordDef};
 use inkwell::builder::Builder;
@@ -130,7 +134,10 @@ impl<'ctx> CodeGen<'ctx> {
     }
 
     /// Compile a complete program
-    pub fn compile_program(&mut self, program: &Program) -> Result<(), String> {
+    pub fn compile_program(&mut self, program: &Program) -> CodegenResult<()> {
+        // Phase 0: Declare runtime functions
+        self.declare_runtime_functions()?;
+
         // Phase 1: Declare all words (forward declarations)
         for word in &program.word_defs {
             self.declare_word(word)?;
@@ -143,14 +150,16 @@ impl<'ctx> CodeGen<'ctx> {
 
         // Phase 3: Verify the module
         if let Err(err) = self.module.verify() {
-            return Err(format!("Module verification failed: {}", err));
+            return Err(CodegenError::VerificationError {
+                message: err.to_string(),
+            });
         }
 
         Ok(())
     }
 
     /// Declare a word (create function signature)
-    fn declare_word(&mut self, word: &WordDef) -> Result<(), String> {
+    fn declare_word(&mut self, word: &WordDef) -> CodegenResult<()> {
         // All words have signature: StackCell* -> StackCell*
         let fn_type = self.stack_type().fn_type(&[self.stack_type().into()], false);
 
@@ -165,11 +174,13 @@ impl<'ctx> CodeGen<'ctx> {
     }
 
     /// Compile a word definition
-    fn compile_word(&mut self, word: &WordDef) -> Result<(), String> {
-        let function = self
-            .functions
-            .get(&word.name)
-            .ok_or_else(|| format!("Function {} not declared", word.name))?;
+    fn compile_word(&mut self, word: &WordDef) -> CodegenResult<()> {
+        let function = self.functions.get(&word.name).ok_or_else(|| {
+            CodegenError::UnknownWord {
+                name: word.name.clone(),
+                location: None,
+            }
+        })?;
 
         // Create entry block
         let entry_block = self.context.append_basic_block(*function, "entry");
@@ -184,7 +195,12 @@ impl<'ctx> CodeGen<'ctx> {
         }
 
         // Return final stack pointer
-        self.builder.build_return(Some(&stack)).map_err(|e| e.to_string())?;
+        self.builder.build_return(Some(&stack)).map_err(|e| {
+            CodegenError::LlvmError {
+                operation: "build_return".to_string(),
+                details: e.to_string(),
+            }
+        })?;
 
         Ok(())
     }
@@ -194,7 +210,7 @@ impl<'ctx> CodeGen<'ctx> {
         &mut self,
         expr: &Expr,
         stack: PointerValue<'ctx>,
-    ) -> Result<PointerValue<'ctx>, String> {
+    ) -> CodegenResult<PointerValue<'ctx>> {
         match expr {
             Expr::IntLit(n) => {
                 // Push integer literal onto stack
@@ -216,28 +232,27 @@ impl<'ctx> CodeGen<'ctx> {
                 self.compile_word_call(name, stack)
             }
 
-            Expr::Quotation(_exprs) => {
-                // TODO: Create quotation closure
-                Err("Quotations not yet implemented".to_string())
-            }
+            Expr::Quotation(_exprs) => Err(CodegenError::Unimplemented {
+                feature: "quotations".to_string(),
+            }),
 
-            Expr::Match { branches: _ } => {
-                // TODO: Compile pattern matching
-                Err("Pattern matching not yet implemented".to_string())
-            }
+            Expr::Match { branches: _ } => Err(CodegenError::Unimplemented {
+                feature: "pattern matching".to_string(),
+            }),
 
             Expr::If {
                 then_branch: _,
                 else_branch: _,
-            } => {
-                // TODO: Compile if expression
-                Err("If expressions not yet implemented".to_string())
-            }
+            } => Err(CodegenError::Unimplemented {
+                feature: "if expressions".to_string(),
+            }),
 
-            Expr::While { condition: _, body: _ } => {
-                // TODO: Compile while loop
-                Err("While loops not yet implemented".to_string())
-            }
+            Expr::While {
+                condition: _,
+                body: _,
+            } => Err(CodegenError::Unimplemented {
+                feature: "while loops".to_string(),
+            }),
         }
     }
 
@@ -246,52 +261,68 @@ impl<'ctx> CodeGen<'ctx> {
         &mut self,
         name: &str,
         stack: PointerValue<'ctx>,
-    ) -> Result<PointerValue<'ctx>, String> {
+    ) -> CodegenResult<PointerValue<'ctx>> {
         // Check if it's a built-in primitive
         if let Some(new_stack) = self.compile_builtin(name, stack)? {
             return Ok(new_stack);
         }
 
         // Otherwise, call user-defined word
-        let function = self
-            .functions
-            .get(name)
-            .ok_or_else(|| format!("Unknown word: {}", name))?;
+        let function = self.functions.get(name).ok_or_else(|| {
+            CodegenError::UnknownWord {
+                name: name.to_string(),
+                location: None,
+            }
+        })?;
 
         let result = self
             .builder
             .build_call(*function, &[stack.into()], "call")
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| CodegenError::LlvmError {
+                operation: "build_call".to_string(),
+                details: e.to_string(),
+            })?;
 
-        Ok(result.try_as_basic_value().left().unwrap().into_pointer_value())
+        Ok(result
+            .try_as_basic_value()
+            .left()
+            .unwrap()
+            .into_pointer_value())
     }
 
     // compile_builtin is implemented in primitives.rs
+
+    /// Helper: Call a runtime function with arguments
+    fn call_runtime<'a>(
+        &mut self,
+        fn_name: &str,
+        args: &[inkwell::values::BasicMetadataValueEnum<'ctx>],
+    ) -> CodegenResult<PointerValue<'ctx>> {
+        let function = self.get_runtime_function(fn_name)?;
+
+        let result = self
+            .builder
+            .build_call(function, args, fn_name)
+            .map_err(|e| CodegenError::LlvmError {
+                operation: fn_name.to_string(),
+                details: e.to_string(),
+            })?;
+
+        Ok(result
+            .try_as_basic_value()
+            .left()
+            .unwrap()
+            .into_pointer_value())
+    }
 
     /// Push an integer literal onto the stack
     fn compile_push_int(
         &mut self,
         value: i64,
         stack: PointerValue<'ctx>,
-    ) -> Result<PointerValue<'ctx>, String> {
-        // Declare external runtime function: push_int
-        let fn_type = self.stack_type().fn_type(
-            &[self.stack_type().into(), self.context.i64_type().into()],
-            false,
-        );
-
-        let push_int = self.module.get_function("push_int").unwrap_or_else(|| {
-            self.module.add_function("push_int", fn_type, None)
-        });
-
+    ) -> CodegenResult<PointerValue<'ctx>> {
         let int_val = self.context.i64_type().const_int(value as u64, true);
-
-        let result = self
-            .builder
-            .build_call(push_int, &[stack.into(), int_val.into()], "push_int")
-            .map_err(|e| e.to_string())?;
-
-        Ok(result.try_as_basic_value().left().unwrap().into_pointer_value())
+        self.call_runtime("push_int", &[stack.into(), int_val.into()])
     }
 
     /// Push a boolean literal onto the stack
@@ -299,25 +330,9 @@ impl<'ctx> CodeGen<'ctx> {
         &mut self,
         value: bool,
         stack: PointerValue<'ctx>,
-    ) -> Result<PointerValue<'ctx>, String> {
-        // Declare external runtime function: push_bool
-        let fn_type = self.stack_type().fn_type(
-            &[self.stack_type().into(), self.context.bool_type().into()],
-            false,
-        );
-
-        let push_bool = self.module.get_function("push_bool").unwrap_or_else(|| {
-            self.module.add_function("push_bool", fn_type, None)
-        });
-
+    ) -> CodegenResult<PointerValue<'ctx>> {
         let bool_val = self.context.bool_type().const_int(value as u64, false);
-
-        let result = self
-            .builder
-            .build_call(push_bool, &[stack.into(), bool_val.into()], "push_bool")
-            .map_err(|e| e.to_string())?;
-
-        Ok(result.try_as_basic_value().left().unwrap().into_pointer_value())
+        self.call_runtime("push_bool", &[stack.into(), bool_val.into()])
     }
 
     /// Push a string literal onto the stack
@@ -325,33 +340,20 @@ impl<'ctx> CodeGen<'ctx> {
         &mut self,
         value: &str,
         stack: PointerValue<'ctx>,
-    ) -> Result<PointerValue<'ctx>, String> {
+    ) -> CodegenResult<PointerValue<'ctx>> {
         // Create global string constant
-        let string_global = self.builder.build_global_string_ptr(value, "str").map_err(|e| e.to_string())?;
-
-        // Declare external runtime function: push_string
-        let fn_type = self.stack_type().fn_type(
-            &[
-                self.stack_type().into(),
-                self.context.ptr_type(AddressSpace::default()).into(),
-            ],
-            false,
-        );
-
-        let push_string = self.module.get_function("push_string").unwrap_or_else(|| {
-            self.module.add_function("push_string", fn_type, None)
-        });
-
-        let result = self
+        let string_global = self
             .builder
-            .build_call(
-                push_string,
-                &[stack.into(), string_global.as_pointer_value().into()],
-                "push_string",
-            )
-            .map_err(|e| e.to_string())?;
+            .build_global_string_ptr(value, "str")
+            .map_err(|e| CodegenError::LlvmError {
+                operation: "build_global_string_ptr".to_string(),
+                details: e.to_string(),
+            })?;
 
-        Ok(result.try_as_basic_value().left().unwrap().into_pointer_value())
+        self.call_runtime(
+            "push_string",
+            &[stack.into(), string_global.as_pointer_value().into()],
+        )
     }
 
     /// Generate LLVM IR as a string
@@ -360,10 +362,13 @@ impl<'ctx> CodeGen<'ctx> {
     }
 
     /// Write LLVM IR to a file
-    pub fn emit_to_file(&self, path: &str) -> Result<(), String> {
+    pub fn emit_to_file(&self, path: &str) -> CodegenResult<()> {
         self.module
             .print_to_file(path)
-            .map_err(|e| format!("Failed to write IR: {}", e))
+            .map_err(|e| CodegenError::LlvmError {
+                operation: "write_to_file".to_string(),
+                details: e.to_string(),
+            })
     }
 }
 
@@ -415,7 +420,10 @@ mod tests {
                 inputs: StackType::Empty.push(Type::Int),
                 outputs: StackType::Empty.push(Type::Int),
             },
-            body: vec![Expr::WordCall("dup".to_string()), Expr::WordCall("+".to_string())],
+            body: vec![
+                Expr::WordCall("dup".to_string()),
+                Expr::WordCall("+".to_string()),
+            ],
         };
 
         let program = Program {
@@ -427,5 +435,204 @@ mod tests {
 
         let ir = codegen.emit_ir();
         assert!(ir.contains("@double"));
+    }
+
+    #[test]
+    fn test_codegen_boolean() {
+        let context = Context::create();
+        let mut codegen = CodeGen::new(&context, "test_module");
+
+        // : truth ( -- Bool ) true ;
+        let word = WordDef {
+            name: "truth".to_string(),
+            effect: Effect {
+                inputs: StackType::Empty,
+                outputs: StackType::Empty.push(Type::Bool),
+            },
+            body: vec![Expr::BoolLit(true)],
+        };
+
+        let program = Program {
+            type_defs: vec![],
+            word_defs: vec![word],
+        };
+
+        codegen.compile_program(&program).unwrap();
+
+        let ir = codegen.emit_ir();
+        assert!(ir.contains("@truth"));
+        assert!(ir.contains("push_bool"));
+    }
+
+    #[test]
+    fn test_codegen_string() {
+        let context = Context::create();
+        let mut codegen = CodeGen::new(&context, "test_module");
+
+        // : hello ( -- String ) "world" ;
+        let word = WordDef {
+            name: "hello".to_string(),
+            effect: Effect {
+                inputs: StackType::Empty,
+                outputs: StackType::Empty.push(Type::String),
+            },
+            body: vec![Expr::StringLit("world".to_string())],
+        };
+
+        let program = Program {
+            type_defs: vec![],
+            word_defs: vec![word],
+        };
+
+        codegen.compile_program(&program).unwrap();
+
+        let ir = codegen.emit_ir();
+        assert!(ir.contains("@hello"));
+        assert!(ir.contains("push_string"));
+        assert!(ir.contains("world"));
+    }
+
+    #[test]
+    fn test_codegen_multiple_words() {
+        let context = Context::create();
+        let mut codegen = CodeGen::new(&context, "test_module");
+
+        // : five ( -- Int ) 5 ;
+        // : ten ( -- Int ) 10 ;
+        // : add-them ( -- Int ) five ten + ;
+        let program = Program {
+            type_defs: vec![],
+            word_defs: vec![
+                WordDef {
+                    name: "five".to_string(),
+                    effect: Effect {
+                        inputs: StackType::Empty,
+                        outputs: StackType::Empty.push(Type::Int),
+                    },
+                    body: vec![Expr::IntLit(5)],
+                },
+                WordDef {
+                    name: "ten".to_string(),
+                    effect: Effect {
+                        inputs: StackType::Empty,
+                        outputs: StackType::Empty.push(Type::Int),
+                    },
+                    body: vec![Expr::IntLit(10)],
+                },
+                WordDef {
+                    name: "add_them".to_string(),
+                    effect: Effect {
+                        inputs: StackType::Empty,
+                        outputs: StackType::Empty.push(Type::Int),
+                    },
+                    body: vec![
+                        Expr::WordCall("five".to_string()),
+                        Expr::WordCall("ten".to_string()),
+                        Expr::WordCall("+".to_string()),
+                    ],
+                },
+            ],
+        };
+
+        codegen.compile_program(&program).unwrap();
+
+        let ir = codegen.emit_ir();
+        assert!(ir.contains("@five"));
+        assert!(ir.contains("@ten"));
+        assert!(ir.contains("@add_them"));
+    }
+
+    #[test]
+    fn test_codegen_unknown_word_error() {
+        let context = Context::create();
+        let mut codegen = CodeGen::new(&context, "test_module");
+
+        // : bad ( -- Int ) unknown_word ;
+        let word = WordDef {
+            name: "bad".to_string(),
+            effect: Effect {
+                inputs: StackType::Empty,
+                outputs: StackType::Empty.push(Type::Int),
+            },
+            body: vec![Expr::WordCall("unknown_word".to_string())],
+        };
+
+        let program = Program {
+            type_defs: vec![],
+            word_defs: vec![word],
+        };
+
+        let result = codegen.compile_program(&program);
+        assert!(result.is_err());
+
+        if let Err(CodegenError::UnknownWord { name, .. }) = result {
+            assert_eq!(name, "unknown_word");
+        } else {
+            panic!("Expected UnknownWord error");
+        }
+    }
+
+    #[test]
+    fn test_codegen_unimplemented_features() {
+        let context = Context::create();
+        let mut codegen = CodeGen::new(&context, "test_module");
+
+        // Test quotations
+        let word = WordDef {
+            name: "test_quot".to_string(),
+            effect: Effect {
+                inputs: StackType::Empty,
+                outputs: StackType::Empty,
+            },
+            body: vec![Expr::Quotation(vec![Expr::IntLit(42)])],
+        };
+
+        let program = Program {
+            type_defs: vec![],
+            word_defs: vec![word],
+        };
+
+        let result = codegen.compile_program(&program);
+        assert!(result.is_err());
+
+        if let Err(CodegenError::Unimplemented { feature }) = result {
+            assert_eq!(feature, "quotations");
+        } else {
+            panic!("Expected Unimplemented error");
+        }
+    }
+
+    #[test]
+    fn test_emit_to_file() {
+        use std::fs;
+
+        let context = Context::create();
+        let mut codegen = CodeGen::new(&context, "test_module");
+
+        let word = WordDef {
+            name: "test".to_string(),
+            effect: Effect {
+                inputs: StackType::Empty,
+                outputs: StackType::Empty.push(Type::Int),
+            },
+            body: vec![Expr::IntLit(42)],
+        };
+
+        let program = Program {
+            type_defs: vec![],
+            word_defs: vec![word],
+        };
+
+        codegen.compile_program(&program).unwrap();
+
+        let temp_file = "/tmp/test_cem_output.ll";
+        codegen.emit_to_file(temp_file).unwrap();
+
+        assert!(fs::metadata(temp_file).is_ok());
+        let contents = fs::read_to_string(temp_file).unwrap();
+        assert!(contents.contains("@test"));
+
+        // Cleanup
+        fs::remove_file(temp_file).ok();
     }
 }

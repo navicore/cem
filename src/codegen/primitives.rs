@@ -11,7 +11,7 @@ This module handles compilation of built-in operations:
 Each primitive is implemented as a runtime function call.
 */
 
-use super::CodeGen;
+use super::{CodeGen, CodegenResult};
 use inkwell::values::PointerValue;
 
 impl<'ctx> CodeGen<'ctx> {
@@ -20,7 +20,7 @@ impl<'ctx> CodeGen<'ctx> {
         &mut self,
         name: &str,
         stack: PointerValue<'ctx>,
-    ) -> Result<Option<PointerValue<'ctx>>, String> {
+    ) -> CodegenResult<Option<PointerValue<'ctx>>> {
         match name {
             // Stack operations
             "dup" => self.compile_runtime_call("dup", stack),
@@ -54,22 +54,10 @@ impl<'ctx> CodeGen<'ctx> {
         &mut self,
         fn_name: &str,
         stack: PointerValue<'ctx>,
-    ) -> Result<Option<PointerValue<'ctx>>, String> {
-        // All runtime functions have signature: StackCell* -> StackCell*
-        let fn_type = self.stack_type().fn_type(&[self.stack_type().into()], false);
-
-        // Get or declare the runtime function
-        let runtime_fn = self.module.get_function(fn_name).unwrap_or_else(|| {
-            self.module.add_function(fn_name, fn_type, None)
-        });
-
-        // Call the runtime function
-        let result = self
-            .builder
-            .build_call(runtime_fn, &[stack.into()], fn_name)
-            .map_err(|e| e.to_string())?;
-
-        Ok(Some(result.try_as_basic_value().left().unwrap().into_pointer_value()))
+    ) -> CodegenResult<Option<PointerValue<'ctx>>> {
+        // Use the call_runtime helper from the parent module
+        let result = self.call_runtime(fn_name, &[stack.into()])?;
+        Ok(Some(result))
     }
 }
 

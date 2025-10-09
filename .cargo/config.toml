@@ -1,25 +1,15 @@
 # Cargo configuration for Cem compiler
-# This sets up environment variables needed for LLVM compilation
-
-[env]
-# LLVM 18 installation path
-LLVM_SYS_180_PREFIX = "/opt/homebrew/opt/llvm@18"
-
-# Library search path for linking (includes zstd and other deps)
-LIBRARY_PATH = "/opt/homebrew/lib"
+#
+# LLVM Configuration:
+# Set the LLVM_SYS_180_PREFIX environment variable to your LLVM 18 installation.
+#
+# Examples:
+#   macOS (Homebrew): export LLVM_SYS_180_PREFIX=/opt/homebrew/opt/llvm@18
+#   Linux (Ubuntu):   export LLVM_SYS_180_PREFIX=/usr/lib/llvm-18
+#   Custom install:   export LLVM_SYS_180_PREFIX=/path/to/llvm-18
+#
+# See BUILD.md for detailed setup instructions.
 
 [build]
 # Additional rustc flags can go here if needed
 # rustflags = []
-
-[target.aarch64-apple-darwin]
-# macOS ARM64 specific configuration
-rustflags = [
-    "-C", "link-arg=-L/opt/homebrew/lib",
-]
-
-[target.x86_64-apple-darwin]
-# macOS x86_64 specific configuration
-rustflags = [
-    "-C", "link-arg=-L/opt/homebrew/lib",
-]

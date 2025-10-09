@@ -34,6 +34,8 @@ sudo pacman -S llvm18 zstd
 
 ### Option 1: Using `just` (Recommended)
 
+The `justfile` handles LLVM paths automatically for macOS:
+
 ```bash
 # Build the project
 just build
@@ -53,43 +55,47 @@ just
 
 ### Option 2: Using `cargo` directly
 
-The project is configured to work with plain `cargo` commands thanks to `.cargo/config.toml`:
+Set the LLVM path first:
 
 ```bash
-# Build
+# macOS (Homebrew)
+export LLVM_SYS_180_PREFIX=/opt/homebrew/opt/llvm@18
+export LIBRARY_PATH=/opt/homebrew/lib
+
+# Linux (Ubuntu/Debian)
+export LLVM_SYS_180_PREFIX=/usr/lib/llvm-18
+
+# Then use cargo
 cargo build
-
-# Test
 cargo test
-
-# Release build
 cargo build --release
 ```
 
+**Tip**: Add the export commands to your shell profile (`~/.zshrc` or `~/.bashrc`) to avoid setting them every time.
+
 ## Build Configuration
 
-The LLVM paths are configured in two places:
+The LLVM paths must be set via environment variables:
 
-1. **`.cargo/config.toml`**: Makes `cargo` commands work out of the box
-   - Sets `LLVM_SYS_180_PREFIX` to point to LLVM 18
-   - Adds library search paths for linking
+1. **`LLVM_SYS_180_PREFIX`**: Path to your LLVM 18 installation (required)
+2. **`LIBRARY_PATH`**: Library search path for linking dependencies like zstd
 
-2. **`justfile`**: Makes `just` commands work
-   - Exports the same environment variables
-   - Provides convenient aliases for common tasks
+The `justfile` sets these automatically for macOS Homebrew users. For other platforms or custom LLVM installations, set them manually before running `cargo`.
 
 ## Troubleshooting
 
 ### "No suitable version of LLVM was found"
 
-**Solution**: Install LLVM 18 and ensure the paths in `.cargo/config.toml` match your installation:
+**Solution**: Install LLVM 18 and set `LLVM_SYS_180_PREFIX`:
 
 ```bash
 # Find your LLVM installation
 brew --prefix llvm@18   # macOS
 which llvm-config-18    # Linux
 
-# Update .cargo/config.toml with the correct path
+# Set the environment variable
+export LLVM_SYS_180_PREFIX=$(brew --prefix llvm@18)  # macOS
+export LLVM_SYS_180_PREFIX=/usr/lib/llvm-18          # Linux
 ```
 
 ### "library 'zstd' not found"
