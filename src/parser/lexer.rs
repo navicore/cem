@@ -213,9 +213,9 @@ impl Lexer {
                     self.advance();
                 }
                 '\n' => {
+                    self.advance();
                     self.line += 1;
-                    self.column = 1;
-                    self.position += 1;
+                    self.column = 0; // Will be incremented to 1 by next advance
                 }
                 '#' => {
                     // Comment until end of line
@@ -229,12 +229,35 @@ impl Lexer {
     }
 
     fn string_literal(&mut self) -> Token {
+        const MAX_STRING_LENGTH: usize = 1_000_000; // 1MB limit
+
         let start_line = self.line;
         let start_column = self.column;
         self.advance(); // consume opening "
 
         let mut value = String::new();
         while !self.is_at_end() && self.peek() != '"' {
+            // Check string length limit
+            if value.len() >= MAX_STRING_LENGTH {
+                // Return error token
+                return Token {
+                    kind: TokenKind::Ident, // Use Ident for errors
+                    lexeme: format!("ERROR: String exceeds maximum length of {} bytes", MAX_STRING_LENGTH),
+                    line: start_line,
+                    column: start_column,
+                };
+            }
+
+            if self.peek() == '\n' {
+                // Unterminated string (newline before closing quote)
+                return Token {
+                    kind: TokenKind::Ident,
+                    lexeme: "ERROR: Unterminated string literal (newline)".to_string(),
+                    line: start_line,
+                    column: start_column,
+                };
+            }
+
             if self.peek() == '\\' {
                 self.advance();
                 if !self.is_at_end() {
@@ -255,9 +278,17 @@ impl Lexer {
             }
         }
 
-        if !self.is_at_end() {
-            self.advance(); // consume closing "
+        if self.is_at_end() {
+            // Unterminated string (EOF before closing quote)
+            return Token {
+                kind: TokenKind::Ident,
+                lexeme: "ERROR: Unterminated string literal (EOF)".to_string(),
+                line: start_line,
+                column: start_column,
+            };
         }
+
+        self.advance(); // consume closing "
 
         Token {
             kind: TokenKind::StringLiteral,
@@ -450,5 +481,47 @@ mod tests {
 
         assert_eq!(tokens[0].kind, TokenKind::IntLiteral);
         assert_eq!(tokens[0].lexeme, "42");
+    }
+
+    #[test]
+    fn test_unterminated_string_newline() {
+        let mut lexer = Lexer::new("\"hello\n");
+        let tokens = lexer.tokenize();
+
+        // Should get an error token
+        assert!(tokens[0].lexeme.starts_with("ERROR"));
+        assert!(tokens[0].lexeme.contains("Unterminated"));
+    }
+
+    #[test]
+    fn test_unterminated_string_eof() {
+        let mut lexer = Lexer::new("\"hello");
+        let tokens = lexer.tokenize();
+
+        // Should get an error token
+        assert!(tokens[0].lexeme.starts_with("ERROR"));
+        assert!(tokens[0].lexeme.contains("Unterminated"));
+    }
+
+    #[test]
+    fn test_valid_string() {
+        let mut lexer = Lexer::new("\"hello world\"");
+        let tokens = lexer.tokenize();
+
+        assert_eq!(tokens[0].kind, TokenKind::StringLiteral);
+        assert_eq!(tokens[0].lexeme, "hello world");
+    }
+
+    #[test]
+    fn test_newline_handling() {
+        let mut lexer = Lexer::new("42\n43\n44");
+        let tokens = lexer.tokenize();
+
+        assert_eq!(tokens[0].kind, TokenKind::IntLiteral);
+        assert_eq!(tokens[0].line, 1);
+        assert_eq!(tokens[1].kind, TokenKind::IntLiteral);
+        assert_eq!(tokens[1].line, 2);
+        assert_eq!(tokens[2].kind, TokenKind::IntLiteral);
+        assert_eq!(tokens[2].line, 3);
     }
 }
