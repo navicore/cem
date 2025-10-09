@@ -5,8 +5,9 @@
 /// - Abstract syntax tree (AST) representation
 /// - Type checker with effect inference
 /// - Pattern matching exhaustiveness checking
-/// - LLVM code generation (future)
+/// - LLVM code generation
 pub mod ast;
+pub mod codegen;
 pub mod parser;
 pub mod typechecker;
 
