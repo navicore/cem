@@ -1,32 +1,13 @@
-# hello.cem - Simple Cem program demonstrating basic features
+# hello.cem - Simple test program
 
-# Basic arithmetic
-: square ( Int -- Int )
-  dup * ;
+# Push the number 42
+: fortytwo ( -- Int )
+  42 ;
 
-: pythagorean ( Int Int -- Int )
-  square swap square + ;
+# Add two numbers: 5 + 3 = 8
+: eight ( -- Int )
+  5 3 + ;
 
-# Stack manipulation
-: over ( A B -- A B A )
-  swap dup rot ;
-
-# Working with Option types
-: unwrap-or ( Option(Int) Int -- Int )
-  swap match
-    Some => [ swap drop ]
-    None => [ ]
-  end ;
-
-# Composition
-: double ( Int -- Int )
-  2 * ;
-
-: quadruple ( Int -- Int )
-  double double ;
-
-# This demonstrates:
-# - Type inference and checking
-# - Polymorphic effects (over works on any types)
-# - Pattern matching with exhaustiveness checking
-# - Word composition
+# Multiply: 6 * 7 = 42
+: product ( -- Int )
+  6 7 * ;

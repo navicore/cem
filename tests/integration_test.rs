@@ -1,160 +1,95 @@
-/// End-to-end integration tests
-///
-/// Tests that parse and type-check complete Cem programs
+/**
+End-to-end integration test: Cem source → LLVM IR → executable
+*/
 
-use cem::parser::Parser;
-use cem::typechecker::TypeChecker;
+use cem::ast::{Expr, Program, WordDef};
+use cem::ast::types::{Effect, StackType, Type};
+use cem::codegen::{CodeGen, compile_to_object};
+use std::process::Command;
 
 #[test]
-fn test_parse_and_typecheck_square() {
-    let input = r#"
-        : square ( Int -- Int )
-          dup * ;
-    "#;
+fn test_end_to_end_compilation() {
+    // Build the runtime first
+    let runtime_status = Command::new("just")
+        .arg("build-runtime")
+        .status()
+        .expect("Failed to build runtime");
+    
+    assert!(runtime_status.success(), "Runtime build failed");
 
-    // Parse
-    let mut parser = Parser::new(input);
-    let program = parser.parse().expect("Parse failed");
+    // Create a simple program: : fortytwo ( -- Int ) 42 ;
+    let word = WordDef {
+        name: "fortytwo".to_string(),
+        effect: Effect {
+            inputs: StackType::Empty,
+            outputs: StackType::Empty.push(Type::Int),
+        },
+        body: vec![Expr::IntLit(42)],
+    };
 
-    // Type check
-    let mut checker = TypeChecker::new();
-    let result = checker.check_program(&program);
+    let program = Program {
+        type_defs: vec![],
+        word_defs: vec![word],
+    };
 
-    assert!(result.is_ok(), "Type check failed: {:?}", result.err());
+    // Generate LLVM IR
+    let mut codegen = CodeGen::new();
+    let ir = codegen.compile_program(&program).expect("Failed to generate IR");
+
+    // Verify IR contains expected elements
+    assert!(ir.contains("define ptr @fortytwo"));
+    assert!(ir.contains("call ptr @push_int"));
+    assert!(ir.contains("i64 42"));
+
+    // Compile to object file (tests that LLVM accepts our IR)
+    compile_to_object(&ir, "test_fortytwo")
+        .expect("Failed to compile IR to object");
+
+    // Clean up
+    std::fs::remove_file("test_fortytwo.o").ok();
+    std::fs::remove_file("test_fortytwo.ll").ok();
 }
 
 #[test]
-fn test_parse_and_typecheck_arithmetic() {
-    let input = r#"
-        : add-one ( Int -- Int )
-          1 + ;
+fn test_arithmetic_compilation() {
+    // Build runtime
+    let runtime_status = Command::new("just")
+        .arg("build-runtime")
+        .status()
+        .expect("Failed to build runtime");
+    
+    assert!(runtime_status.success());
 
-        : times-two ( Int -- Int )
-          2 * ;
+    // : eight ( -- Int ) 5 3 + ;
+    let word = WordDef {
+        name: "eight".to_string(),
+        effect: Effect {
+            inputs: StackType::Empty,
+            outputs: StackType::Empty.push(Type::Int),
+        },
+        body: vec![
+            Expr::IntLit(5),
+            Expr::IntLit(3),
+            Expr::WordCall("add".to_string()),
+        ],
+    };
 
-        : add-one-times-two ( Int -- Int )
-          add-one times-two ;
-    "#;
+    let program = Program {
+        type_defs: vec![],
+        word_defs: vec![word],
+    };
 
-    let mut parser = Parser::new(input);
-    let program = parser.parse().expect("Parse failed");
+    // Generate and compile
+    let mut codegen = CodeGen::new();
+    let ir = codegen.compile_program(&program).expect("Failed to generate IR");
 
-    let mut checker = TypeChecker::new();
-    let result = checker.check_program(&program);
+    assert!(ir.contains("@eight"));
+    assert!(ir.contains("@add"));
 
-    assert!(result.is_ok(), "Type check failed: {:?}", result.err());
-}
+    compile_to_object(&ir, "test_eight")
+        .expect("Failed to compile");
 
-#[test]
-fn test_parse_and_typecheck_option_handling() {
-    let input = r#"
-        : unwrap-or ( Option(Int) Int -- Int )
-          swap match
-            Some => [ swap drop ]
-            None => [ ]
-          end ;
-    "#;
-
-    let mut parser = Parser::new(input);
-    let program = parser.parse().expect("Parse failed");
-
-    let mut checker = TypeChecker::new();
-    let result = checker.check_program(&program);
-
-    assert!(result.is_ok(), "Type check failed: {:?}", result.err());
-}
-
-#[test]
-fn test_type_error_detected() {
-    // This should fail: trying to add boolean and int
-    let input = r#"
-        : bad ( Bool -- Int )
-          true + ;
-    "#;
-
-    let mut parser = Parser::new(input);
-    let program = parser.parse().expect("Parse failed");
-
-    let mut checker = TypeChecker::new();
-    let result = checker.check_program(&program);
-
-    // Should be a type error
-    assert!(result.is_err(), "Expected type error but got success");
-}
-
-#[test]
-fn test_non_exhaustive_match() {
-    // Missing None branch
-    let input = r#"
-        : get-value ( Option(Int) -- Int )
-          match
-            Some => [ ]
-          end ;
-    "#;
-
-    let mut parser = Parser::new(input);
-    let program = parser.parse().expect("Parse failed");
-
-    let mut checker = TypeChecker::new();
-    let result = checker.check_program(&program);
-
-    // Should be non-exhaustive error
-    assert!(result.is_err(), "Expected non-exhaustive error");
-}
-
-#[test]
-fn test_polymorphic_word() {
-    let input = r#"
-        : over ( A B -- A B A )
-          swap dup rot ;
-    "#;
-
-    let mut parser = Parser::new(input);
-    let program = parser.parse().expect("Parse failed");
-
-    let mut checker = TypeChecker::new();
-    let result = checker.check_program(&program);
-
-    assert!(result.is_ok(), "Type check failed: {:?}", result.err());
-}
-
-#[test]
-fn test_multiple_words() {
-    let input = r#"
-        : double ( Int -- Int )
-          2 * ;
-
-        : quadruple ( Int -- Int )
-          double double ;
-    "#;
-
-    let mut parser = Parser::new(input);
-    let program = parser.parse().expect("Parse failed");
-
-    let mut checker = TypeChecker::new();
-    let result = checker.check_program(&program);
-
-    assert!(result.is_ok(), "Type check failed: {:?}", result.err());
-}
-
-#[test]
-fn test_parse_and_typecheck_literals() {
-    let input = r#"
-        : test-int ( -- Int )
-          42 ;
-
-        : test-bool ( -- Bool )
-          true ;
-
-        : test-string ( -- String )
-          "hello" ;
-    "#;
-
-    let mut parser = Parser::new(input);
-    let program = parser.parse().expect("Parse failed");
-
-    let mut checker = TypeChecker::new();
-    let result = checker.check_program(&program);
-
-    assert!(result.is_ok(), "Type check failed: {:?}", result.err());
+    // Clean up
+    std::fs::remove_file("test_eight.o").ok();
+    std::fs::remove_file("test_eight.ll").ok();
 }

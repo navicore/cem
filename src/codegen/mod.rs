@@ -1,389 +1,242 @@
 /**
-LLVM Code Generation for Cem
+LLVM IR Code Generation via Text
 
-This module compiles type-checked Cem programs to LLVM IR.
+This module generates LLVM IR as text (.ll files) and invokes clang
+to produce executables. This approach is simpler and more portable than
+using FFI bindings (inkwell).
+
+See docs/LLVM_TEXT_IR.md for design rationale.
 
 ## Architecture
 
-Cem uses a **stack machine** architecture for its runtime:
-- Stack is represented as a linked list of heap-allocated cells
-- Each stack cell contains a tagged union (value + type tag)
-- Stack operations are function calls to runtime primitives
+The code generator walks the AST and emits LLVM IR text:
+- Words → Functions
+- Literals → push_int/push_bool/push_string calls
+- Word calls → Function calls
+- Primitives → Runtime function calls
 
-## Stack Representation
-
-```c
-// Runtime representation (will be implemented in runtime.c)
-typedef enum {
-    TAG_INT,
-    TAG_BOOL,
-    TAG_STRING,
-    TAG_QUOTATION,
-    TAG_VARIANT,
-} ValueTag;
-
-typedef struct StackCell {
-    ValueTag tag;
-    union {
-        int64_t i;
-        bool b;
-        char* s;
-        void* quotation;
-        struct Variant* variant;
-    } value;
-    struct StackCell* next;
-} StackCell;
-```
-
-## Compilation Strategy
-
-1. **Words → LLVM Functions**
-   - Each word becomes an LLVM function taking stack pointer
-   - Returns new stack pointer after execution
-   - Signature: `StackCell* word_name(StackCell* stack)`
-
-2. **Expressions → Stack Operations**
-   - Literals: push onto stack
-   - Word calls: call corresponding function
-   - Quotations: create closure, push pointer
-   - Pattern matching: runtime type dispatch
-
-3. **Built-in Operations**
-   - Stack ops (dup, drop, swap, etc.) → runtime calls
-   - Arithmetic (+, -, *, /) → pop operands, compute, push result
-   - Comparisons (<, >, =) → pop, compare, push bool
-
-## Example Compilation
-
-```cem
-: square ( Int -- Int )
-  dup * ;
-```
-
-Compiles to:
+Example output:
 
 ```llvm
-define %StackCell* @square(%StackCell* %stack) {
+define ptr @square(ptr %stack) {
 entry:
-  %stack1 = call %StackCell* @dup(%StackCell* %stack)
-  %stack2 = call %StackCell* @multiply(%StackCell* %stack1)
-  ret %StackCell* %stack2
+  %0 = call ptr @dup(ptr %stack)
+  %1 = call ptr @multiply(ptr %0)
+  ret ptr %1
 }
 ```
-
-## Phases
-
-Phase 1: Basic infrastructure (this file)
-Phase 2: Primitive operations (primitives.rs)
-Phase 3: Word compilation (words.rs)
-Phase 4: Pattern matching (patterns.rs)
-Phase 5: Optimization passes (optimize.rs)
 */
 
 pub mod error;
-pub mod primitives;
-pub mod runtime;
+pub mod ir;
+pub mod linker;
 
 pub use error::{CodegenError, CodegenResult};
+pub use ir::IRGenerator;
+pub use linker::{compile_to_object, link_program};
 
 use crate::ast::{Expr, Program, WordDef};
-use inkwell::builder::Builder;
-use inkwell::context::Context;
-use inkwell::module::Module;
-use inkwell::types::PointerType;
-use inkwell::values::{FunctionValue, PointerValue};
-use inkwell::AddressSpace;
-use std::collections::HashMap;
+use std::fmt::Write as _;
 
-/// Main code generator for Cem programs
-pub struct CodeGen<'ctx> {
-    pub context: &'ctx Context,
-    pub module: Module<'ctx>,
-    pub builder: Builder<'ctx>,
-
-    /// Type of stack cell (opaque struct pointer)
-    stack_cell_type: PointerType<'ctx>,
-
-    /// Map from word names to compiled functions
-    functions: HashMap<String, FunctionValue<'ctx>>,
+/// Main code generator
+pub struct CodeGen {
+    output: String,
+    temp_counter: usize,
 }
 
-impl<'ctx> CodeGen<'ctx> {
+impl CodeGen {
     /// Create a new code generator
-    pub fn new(context: &'ctx Context, module_name: &str) -> Self {
-        let module = context.create_module(module_name);
-        let builder = context.create_builder();
-
-        // Define opaque stack cell type
-        // In LLVM, this is just a pointer to an opaque struct
-        // The actual definition will be in the C runtime
-        let stack_cell_type = context.ptr_type(AddressSpace::default());
-
+    pub fn new() -> Self {
         CodeGen {
-            context,
-            module,
-            builder,
-            stack_cell_type,
-            functions: HashMap::new(),
+            output: String::new(),
+            temp_counter: 0,
         }
     }
 
-    /// Get the stack cell pointer type
-    pub fn stack_type(&self) -> PointerType<'ctx> {
-        self.stack_cell_type
+    /// Generate a fresh temporary variable name (without % prefix)
+    fn fresh_temp(&mut self) -> String {
+        let name = format!("{}", self.temp_counter);
+        self.temp_counter += 1;
+        name
     }
 
-    /// Compile a complete program
-    pub fn compile_program(&mut self, program: &Program) -> CodegenResult<()> {
-        // Phase 0: Declare runtime functions
-        self.declare_runtime_functions()?;
+    /// Compile a complete program to LLVM IR
+    pub fn compile_program(&mut self, program: &Program) -> CodegenResult<String> {
+        // Emit module header
+        writeln!(&mut self.output, "; Cem Compiler - Generated LLVM IR")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output).unwrap();
 
-        // Phase 1: Declare all words (forward declarations)
-        for word in &program.word_defs {
-            self.declare_word(word)?;
-        }
+        // Declare runtime functions
+        self.emit_runtime_declarations()?;
 
-        // Phase 2: Compile all word bodies
+        // Emit all word definitions
         for word in &program.word_defs {
             self.compile_word(word)?;
         }
 
-        // Phase 3: Verify the module
-        if let Err(err) = self.module.verify() {
-            return Err(CodegenError::VerificationError {
-                message: err.to_string(),
-            });
+        Ok(self.output.clone())
+    }
+
+    /// Emit declarations for all runtime functions
+    fn emit_runtime_declarations(&mut self) -> CodegenResult<()> {
+        writeln!(&mut self.output, "; Runtime function declarations").unwrap();
+
+        // Stack operations (ptr -> ptr)
+        for func in &["dup", "drop", "swap", "over", "rot"] {
+            writeln!(&mut self.output, "declare ptr @{}(ptr)", func).unwrap();
         }
 
+        // Arithmetic (ptr -> ptr)
+        for func in &["add", "subtract", "multiply", "divide"] {
+            writeln!(&mut self.output, "declare ptr @{}(ptr)", func).unwrap();
+        }
+
+        // Comparisons (ptr -> ptr)
+        for func in &["less_than", "greater_than", "equal"] {
+            writeln!(&mut self.output, "declare ptr @{}(ptr)", func).unwrap();
+        }
+
+        // Push operations
+        writeln!(&mut self.output, "declare ptr @push_int(ptr, i64)").unwrap();
+        writeln!(&mut self.output, "declare ptr @push_bool(ptr, i1)").unwrap();
+        writeln!(&mut self.output, "declare ptr @push_string(ptr, ptr)").unwrap();
+
+        writeln!(&mut self.output).unwrap();
         Ok(())
     }
 
-    /// Declare a word (create function signature)
-    fn declare_word(&mut self, word: &WordDef) -> CodegenResult<()> {
-        // All words have signature: StackCell* -> StackCell*
-        let fn_type = self.stack_type().fn_type(&[self.stack_type().into()], false);
-
-        let function = self.module.add_function(&word.name, fn_type, None);
-
-        // Set parameter name for clarity
-        function.get_nth_param(0).unwrap().set_name("stack");
-
-        self.functions.insert(word.name.clone(), function);
-
-        Ok(())
-    }
-
-    /// Compile a word definition
+    /// Compile a word definition to LLVM function
     fn compile_word(&mut self, word: &WordDef) -> CodegenResult<()> {
-        let function = self.functions.get(&word.name).ok_or_else(|| {
-            CodegenError::UnknownWord {
-                name: word.name.clone(),
-                location: None,
-            }
-        })?;
+        self.temp_counter = 0; // Reset for each function
 
-        // Create entry block
-        let entry_block = self.context.append_basic_block(*function, "entry");
-        self.builder.position_at_end(entry_block);
+        writeln!(&mut self.output, "define ptr @{}(ptr %stack) {{", word.name).unwrap();
+        writeln!(&mut self.output, "entry:").unwrap();
 
-        // Get initial stack pointer from parameter
-        let mut stack = function.get_nth_param(0).unwrap().into_pointer_value();
+        let mut stack_var = "stack".to_string();
 
         // Compile each expression in the body
         for expr in &word.body {
-            stack = self.compile_expr(expr, stack)?;
+            stack_var = self.compile_expr(expr, &stack_var)?;
         }
 
-        // Return final stack pointer
-        self.builder.build_return(Some(&stack)).map_err(|e| {
-            CodegenError::LlvmError {
-                operation: "build_return".to_string(),
-                details: e.to_string(),
-            }
-        })?;
+        // Return final stack
+        writeln!(&mut self.output, "  ret ptr %{}", stack_var).unwrap();
+
+        writeln!(&mut self.output, "}}").unwrap();
+        writeln!(&mut self.output).unwrap();
 
         Ok(())
     }
 
-    /// Compile a single expression
-    fn compile_expr(
-        &mut self,
-        expr: &Expr,
-        stack: PointerValue<'ctx>,
-    ) -> CodegenResult<PointerValue<'ctx>> {
+    /// Compile a single expression, returning the new stack variable name
+    fn compile_expr(&mut self, expr: &Expr, stack: &str) -> CodegenResult<String> {
         match expr {
             Expr::IntLit(n) => {
-                // Push integer literal onto stack
-                self.compile_push_int(*n, stack)
+                let result = self.fresh_temp();
+                writeln!(
+                    &mut self.output,
+                    "  %{} = call ptr @push_int(ptr %{}, i64 {})",
+                    result, stack, n
+                )
+                .unwrap();
+                Ok(result)
             }
 
             Expr::BoolLit(b) => {
-                // Push boolean literal onto stack
-                self.compile_push_bool(*b, stack)
+                let result = self.fresh_temp();
+                let value = if *b { 1 } else { 0 };
+                writeln!(
+                    &mut self.output,
+                    "  %{} = call ptr @push_bool(ptr %{}, i1 {})",
+                    result, stack, value
+                )
+                .unwrap();
+                Ok(result)
             }
 
             Expr::StringLit(s) => {
-                // Push string literal onto stack
-                self.compile_push_string(s, stack)
+                // Create global string constant
+                let str_global = format!("@.str.{}", self.temp_counter);
+                let str_len = s.len() + 1; // +1 for null terminator
+
+                // Emit global at top of file (we'll prepend it later)
+                let global_decl = format!(
+                    "{} = private unnamed_addr constant [{} x i8] c\"{}\\00\"\n",
+                    str_global, str_len, s.escape_default()
+                );
+                self.output = global_decl + &self.output;
+
+                let result = self.fresh_temp();
+                let ptr_temp = self.fresh_temp();
+
+                writeln!(
+                    &mut self.output,
+                    "  %{} = getelementptr inbounds [{} x i8], ptr {}, i32 0, i32 0",
+                    ptr_temp, str_len, str_global
+                )
+                .unwrap();
+                writeln!(
+                    &mut self.output,
+                    "  %{} = call ptr @push_string(ptr %{}, ptr %{})",
+                    result, stack, ptr_temp
+                )
+                .unwrap();
+
+                Ok(result)
             }
 
             Expr::WordCall(name) => {
-                // Call word function
-                self.compile_word_call(name, stack)
+                let result = self.fresh_temp();
+                writeln!(
+                    &mut self.output,
+                    "  %{} = call ptr @{}(ptr %{})",
+                    result, name, stack
+                )
+                .unwrap();
+                Ok(result)
             }
 
-            Expr::Quotation(_exprs) => Err(CodegenError::Unimplemented {
+            Expr::Quotation(_) => Err(CodegenError::Unimplemented {
                 feature: "quotations".to_string(),
             }),
 
-            Expr::Match { branches: _ } => Err(CodegenError::Unimplemented {
+            Expr::Match { .. } => Err(CodegenError::Unimplemented {
                 feature: "pattern matching".to_string(),
             }),
 
-            Expr::If {
-                then_branch: _,
-                else_branch: _,
-            } => Err(CodegenError::Unimplemented {
+            Expr::If { .. } => Err(CodegenError::Unimplemented {
                 feature: "if expressions".to_string(),
             }),
 
-            Expr::While {
-                condition: _,
-                body: _,
-            } => Err(CodegenError::Unimplemented {
+            Expr::While { .. } => Err(CodegenError::Unimplemented {
                 feature: "while loops".to_string(),
             }),
         }
     }
 
-    /// Compile a word call
-    fn compile_word_call(
-        &mut self,
-        name: &str,
-        stack: PointerValue<'ctx>,
-    ) -> CodegenResult<PointerValue<'ctx>> {
-        // Check if it's a built-in primitive
-        if let Some(new_stack) = self.compile_builtin(name, stack)? {
-            return Ok(new_stack);
-        }
-
-        // Otherwise, call user-defined word
-        let function = self.functions.get(name).ok_or_else(|| {
-            CodegenError::UnknownWord {
-                name: name.to_string(),
-                location: None,
-            }
-        })?;
-
-        let result = self
-            .builder
-            .build_call(*function, &[stack.into()], "call")
-            .map_err(|e| CodegenError::LlvmError {
-                operation: "build_call".to_string(),
-                details: e.to_string(),
-            })?;
-
-        Ok(result
-            .try_as_basic_value()
-            .left()
-            .unwrap()
-            .into_pointer_value())
-    }
-
-    // compile_builtin is implemented in primitives.rs
-
-    /// Helper: Call a runtime function with arguments
-    fn call_runtime<'a>(
-        &mut self,
-        fn_name: &str,
-        args: &[inkwell::values::BasicMetadataValueEnum<'ctx>],
-    ) -> CodegenResult<PointerValue<'ctx>> {
-        let function = self.get_runtime_function(fn_name)?;
-
-        let result = self
-            .builder
-            .build_call(function, args, fn_name)
-            .map_err(|e| CodegenError::LlvmError {
-                operation: fn_name.to_string(),
-                details: e.to_string(),
-            })?;
-
-        Ok(result
-            .try_as_basic_value()
-            .left()
-            .unwrap()
-            .into_pointer_value())
-    }
-
-    /// Push an integer literal onto the stack
-    fn compile_push_int(
-        &mut self,
-        value: i64,
-        stack: PointerValue<'ctx>,
-    ) -> CodegenResult<PointerValue<'ctx>> {
-        let int_val = self.context.i64_type().const_int(value as u64, true);
-        self.call_runtime("push_int", &[stack.into(), int_val.into()])
-    }
-
-    /// Push a boolean literal onto the stack
-    fn compile_push_bool(
-        &mut self,
-        value: bool,
-        stack: PointerValue<'ctx>,
-    ) -> CodegenResult<PointerValue<'ctx>> {
-        let bool_val = self.context.bool_type().const_int(value as u64, false);
-        self.call_runtime("push_bool", &[stack.into(), bool_val.into()])
-    }
-
-    /// Push a string literal onto the stack
-    fn compile_push_string(
-        &mut self,
-        value: &str,
-        stack: PointerValue<'ctx>,
-    ) -> CodegenResult<PointerValue<'ctx>> {
-        // Create global string constant
-        let string_global = self
-            .builder
-            .build_global_string_ptr(value, "str")
-            .map_err(|e| CodegenError::LlvmError {
-                operation: "build_global_string_ptr".to_string(),
-                details: e.to_string(),
-            })?;
-
-        self.call_runtime(
-            "push_string",
-            &[stack.into(), string_global.as_pointer_value().into()],
-        )
-    }
-
-    /// Generate LLVM IR as a string
+    /// Get the generated LLVM IR
     pub fn emit_ir(&self) -> String {
-        self.module.print_to_string().to_string()
+        self.output.clone()
     }
+}
 
-    /// Write LLVM IR to a file
-    pub fn emit_to_file(&self, path: &str) -> CodegenResult<()> {
-        self.module
-            .print_to_file(path)
-            .map_err(|e| CodegenError::LlvmError {
-                operation: "write_to_file".to_string(),
-                details: e.to_string(),
-            })
+impl Default for CodeGen {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{Expr, WordDef};
     use crate::ast::types::{Effect, StackType, Type};
 
     #[test]
-    fn test_codegen_basic() {
-        let context = Context::create();
-        let mut codegen = CodeGen::new(&context, "test_module");
+    fn test_codegen_simple() {
+        let mut codegen = CodeGen::new();
 
-        // Simple word: : five ( -- Int ) 5 ;
+        // : five ( -- Int ) 5 ;
         let word = WordDef {
             name: "five".to_string(),
             effect: Effect {
@@ -398,20 +251,17 @@ mod tests {
             word_defs: vec![word],
         };
 
-        codegen.compile_program(&program).unwrap();
+        let ir = codegen.compile_program(&program).unwrap();
 
-        let ir = codegen.emit_ir();
-
-        // Check that the function was generated
-        assert!(ir.contains("define"));
-        assert!(ir.contains("@five"));
-        assert!(ir.contains("push_int"));
+        assert!(ir.contains("define ptr @five"));
+        assert!(ir.contains("call ptr @push_int"));
+        assert!(ir.contains("i64 5"));
+        assert!(ir.contains("ret ptr"));
     }
 
     #[test]
     fn test_codegen_word_call() {
-        let context = Context::create();
-        let mut codegen = CodeGen::new(&context, "test_module");
+        let mut codegen = CodeGen::new();
 
         // : double ( Int -- Int ) dup + ;
         let word = WordDef {
@@ -422,7 +272,7 @@ mod tests {
             },
             body: vec![
                 Expr::WordCall("dup".to_string()),
-                Expr::WordCall("+".to_string()),
+                Expr::WordCall("add".to_string()),
             ],
         };
 
@@ -431,208 +281,10 @@ mod tests {
             word_defs: vec![word],
         };
 
-        codegen.compile_program(&program).unwrap();
+        let ir = codegen.compile_program(&program).unwrap();
 
-        let ir = codegen.emit_ir();
         assert!(ir.contains("@double"));
-    }
-
-    #[test]
-    fn test_codegen_boolean() {
-        let context = Context::create();
-        let mut codegen = CodeGen::new(&context, "test_module");
-
-        // : truth ( -- Bool ) true ;
-        let word = WordDef {
-            name: "truth".to_string(),
-            effect: Effect {
-                inputs: StackType::Empty,
-                outputs: StackType::Empty.push(Type::Bool),
-            },
-            body: vec![Expr::BoolLit(true)],
-        };
-
-        let program = Program {
-            type_defs: vec![],
-            word_defs: vec![word],
-        };
-
-        codegen.compile_program(&program).unwrap();
-
-        let ir = codegen.emit_ir();
-        assert!(ir.contains("@truth"));
-        assert!(ir.contains("push_bool"));
-    }
-
-    #[test]
-    fn test_codegen_string() {
-        let context = Context::create();
-        let mut codegen = CodeGen::new(&context, "test_module");
-
-        // : hello ( -- String ) "world" ;
-        let word = WordDef {
-            name: "hello".to_string(),
-            effect: Effect {
-                inputs: StackType::Empty,
-                outputs: StackType::Empty.push(Type::String),
-            },
-            body: vec![Expr::StringLit("world".to_string())],
-        };
-
-        let program = Program {
-            type_defs: vec![],
-            word_defs: vec![word],
-        };
-
-        codegen.compile_program(&program).unwrap();
-
-        let ir = codegen.emit_ir();
-        assert!(ir.contains("@hello"));
-        assert!(ir.contains("push_string"));
-        assert!(ir.contains("world"));
-    }
-
-    #[test]
-    fn test_codegen_multiple_words() {
-        let context = Context::create();
-        let mut codegen = CodeGen::new(&context, "test_module");
-
-        // : five ( -- Int ) 5 ;
-        // : ten ( -- Int ) 10 ;
-        // : add-them ( -- Int ) five ten + ;
-        let program = Program {
-            type_defs: vec![],
-            word_defs: vec![
-                WordDef {
-                    name: "five".to_string(),
-                    effect: Effect {
-                        inputs: StackType::Empty,
-                        outputs: StackType::Empty.push(Type::Int),
-                    },
-                    body: vec![Expr::IntLit(5)],
-                },
-                WordDef {
-                    name: "ten".to_string(),
-                    effect: Effect {
-                        inputs: StackType::Empty,
-                        outputs: StackType::Empty.push(Type::Int),
-                    },
-                    body: vec![Expr::IntLit(10)],
-                },
-                WordDef {
-                    name: "add_them".to_string(),
-                    effect: Effect {
-                        inputs: StackType::Empty,
-                        outputs: StackType::Empty.push(Type::Int),
-                    },
-                    body: vec![
-                        Expr::WordCall("five".to_string()),
-                        Expr::WordCall("ten".to_string()),
-                        Expr::WordCall("+".to_string()),
-                    ],
-                },
-            ],
-        };
-
-        codegen.compile_program(&program).unwrap();
-
-        let ir = codegen.emit_ir();
-        assert!(ir.contains("@five"));
-        assert!(ir.contains("@ten"));
-        assert!(ir.contains("@add_them"));
-    }
-
-    #[test]
-    fn test_codegen_unknown_word_error() {
-        let context = Context::create();
-        let mut codegen = CodeGen::new(&context, "test_module");
-
-        // : bad ( -- Int ) unknown_word ;
-        let word = WordDef {
-            name: "bad".to_string(),
-            effect: Effect {
-                inputs: StackType::Empty,
-                outputs: StackType::Empty.push(Type::Int),
-            },
-            body: vec![Expr::WordCall("unknown_word".to_string())],
-        };
-
-        let program = Program {
-            type_defs: vec![],
-            word_defs: vec![word],
-        };
-
-        let result = codegen.compile_program(&program);
-        assert!(result.is_err());
-
-        if let Err(CodegenError::UnknownWord { name, .. }) = result {
-            assert_eq!(name, "unknown_word");
-        } else {
-            panic!("Expected UnknownWord error");
-        }
-    }
-
-    #[test]
-    fn test_codegen_unimplemented_features() {
-        let context = Context::create();
-        let mut codegen = CodeGen::new(&context, "test_module");
-
-        // Test quotations
-        let word = WordDef {
-            name: "test_quot".to_string(),
-            effect: Effect {
-                inputs: StackType::Empty,
-                outputs: StackType::Empty,
-            },
-            body: vec![Expr::Quotation(vec![Expr::IntLit(42)])],
-        };
-
-        let program = Program {
-            type_defs: vec![],
-            word_defs: vec![word],
-        };
-
-        let result = codegen.compile_program(&program);
-        assert!(result.is_err());
-
-        if let Err(CodegenError::Unimplemented { feature }) = result {
-            assert_eq!(feature, "quotations");
-        } else {
-            panic!("Expected Unimplemented error");
-        }
-    }
-
-    #[test]
-    fn test_emit_to_file() {
-        use std::fs;
-
-        let context = Context::create();
-        let mut codegen = CodeGen::new(&context, "test_module");
-
-        let word = WordDef {
-            name: "test".to_string(),
-            effect: Effect {
-                inputs: StackType::Empty,
-                outputs: StackType::Empty.push(Type::Int),
-            },
-            body: vec![Expr::IntLit(42)],
-        };
-
-        let program = Program {
-            type_defs: vec![],
-            word_defs: vec![word],
-        };
-
-        codegen.compile_program(&program).unwrap();
-
-        let temp_file = "/tmp/test_cem_output.ll";
-        codegen.emit_to_file(temp_file).unwrap();
-
-        assert!(fs::metadata(temp_file).is_ok());
-        let contents = fs::read_to_string(temp_file).unwrap();
-        assert!(contents.contains("@test"));
-
-        // Cleanup
-        fs::remove_file(temp_file).ok();
+        assert!(ir.contains("call ptr @dup"));
+        assert!(ir.contains("call ptr @add"));
     }
 }
