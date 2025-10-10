@@ -1,1 +1,14 @@
+# Rust build artifacts
 /target
+
+# Runtime build artifacts
+runtime/*.o
+runtime/*.a
+runtime/test_runtime
+runtime/*.dSYM/
+
+# Test artifacts
+test_*.ll
+test_*.o
+*.ll
+*.o

@@ -60,6 +60,29 @@ impl CodeGen {
         name
     }
 
+    /// Escape a string for LLVM IR string literals
+    /// LLVM IR requires hex escaping for non-printable characters
+    fn escape_llvm_string(s: &str) -> String {
+        let mut result = String::new();
+        for ch in s.chars() {
+            match ch {
+                // Printable ASCII except backslash and quotes
+                ' '..='!' | '#'..='[' | ']'..='~' => result.push(ch),
+                // Escape backslash
+                '\\' => result.push_str(r"\\"),
+                // Escape quote
+                '"' => result.push_str(r#"\""#),
+                // All other characters as hex escapes
+                _ => {
+                    for byte in ch.to_string().as_bytes() {
+                        result.push_str(&format!(r"\{:02X}", byte));
+                    }
+                }
+            }
+        }
+        result
+    }
+
     /// Compile a complete program to LLVM IR
     pub fn compile_program(&mut self, program: &Program) -> CodegenResult<String> {
         // Emit module header
@@ -158,12 +181,14 @@ impl CodeGen {
             Expr::StringLit(s) => {
                 // Create global string constant
                 let str_global = format!("@.str.{}", self.temp_counter);
-                let str_len = s.len() + 1; // +1 for null terminator
+                let escaped = Self::escape_llvm_string(s);
+                // Calculate actual byte length after escaping
+                let str_len = s.as_bytes().len() + 1; // +1 for null terminator
 
                 // Emit global at top of file (we'll prepend it later)
                 let global_decl = format!(
                     "{} = private unnamed_addr constant [{} x i8] c\"{}\\00\"\n",
-                    str_global, str_len, s.escape_default()
+                    str_global, str_len, escaped
                 );
                 self.output = global_decl + &self.output;
 

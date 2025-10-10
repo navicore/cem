@@ -42,6 +42,12 @@ void free_stack(StackCell* stack) {
     }
 }
 
+// Runtime error handler
+// Note: Currently uses exit(1) for simplicity. In a production runtime,
+// this could be replaced with setjmp/longjmp or return error codes up the
+// call stack. However, for a stack machine runtime, errors are typically
+// unrecoverable (stack corruption, type errors, etc.), so exit(1) is
+// acceptable for this phase of development.
 void runtime_error(const char* message) {
     fprintf(stderr, "Runtime error: %s\n", message);
     exit(1);
@@ -190,6 +196,9 @@ StackCell* rot(StackCell* stack) {
 // ============================================================================
 // Arithmetic Operations
 // ============================================================================
+// Note: All arithmetic operations use wrapping semantics (like Rust's wrapping_*).
+// Integer overflow wraps around according to two's complement representation.
+// This is standard behavior for stack-based concatenative languages.
 
 StackCell* add(StackCell* stack) {
     if (!stack || !stack->next) {
