@@ -86,11 +86,21 @@ impl CodeGen {
 
     /// Compile a complete program to LLVM IR
     pub fn compile_program(&mut self, program: &Program) -> CodegenResult<String> {
+        self.compile_program_with_main(program, None)
+    }
+
+    /// Compile a complete program to LLVM IR with optional main() function
+    ///
+    /// # Arguments
+    /// * `program` - The AST program to compile
+    /// * `entry_word` - Optional name of word to call from main(). If None, no main() is generated.
+    ///                  If Some("word_name"), generates main() that calls that word and prints result.
+    pub fn compile_program_with_main(&mut self, program: &Program, entry_word: Option<&str>) -> CodegenResult<String> {
         // Emit module header with target triple to match host platform
         writeln!(&mut self.output, "; Cem Compiler - Generated LLVM IR")
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
         writeln!(&mut self.output).unwrap();
-        
+
         // Set target triple to match clang's default (prevents warnings)
         // We query clang directly to get the exact triple it expects
         let target_triple = Self::get_target_triple().map_err(|e| {
@@ -107,6 +117,11 @@ impl CodeGen {
         // Emit all word definitions
         for word in &program.word_defs {
             self.compile_word(word)?;
+        }
+
+        // Generate main() if requested
+        if let Some(word_name) = entry_word {
+            self.emit_main_function(word_name)?;
         }
 
         Ok(self.output.clone())
@@ -163,6 +178,35 @@ impl CodeGen {
         writeln!(&mut self.output, "declare ptr @push_bool(ptr, i1)").unwrap();
         writeln!(&mut self.output, "declare ptr @push_string(ptr, ptr)").unwrap();
 
+        // Utility functions
+        writeln!(&mut self.output, "declare void @print_stack(ptr)").unwrap();
+        writeln!(&mut self.output, "declare void @free_stack(ptr)").unwrap();
+
+        writeln!(&mut self.output).unwrap();
+        Ok(())
+    }
+
+    /// Emit a main() function that calls an entry word
+    ///
+    /// Generates:
+    /// ```llvm
+    /// define i32 @main() {
+    /// entry:
+    ///   %stack = call ptr @entry_word(ptr null)
+    ///   call void @print_stack(ptr %stack)
+    ///   call void @free_stack(ptr %stack)
+    ///   ret i32 0
+    /// }
+    /// ```
+    fn emit_main_function(&mut self, entry_word: &str) -> CodegenResult<()> {
+        writeln!(&mut self.output, "; Main function").unwrap();
+        writeln!(&mut self.output, "define i32 @main() {{").unwrap();
+        writeln!(&mut self.output, "entry:").unwrap();
+        writeln!(&mut self.output, "  %stack = call ptr @{}(ptr null)", entry_word).unwrap();
+        writeln!(&mut self.output, "  call void @print_stack(ptr %stack)").unwrap();
+        writeln!(&mut self.output, "  call void @free_stack(ptr %stack)").unwrap();
+        writeln!(&mut self.output, "  ret i32 0").unwrap();
+        writeln!(&mut self.output, "}}").unwrap();
         writeln!(&mut self.output).unwrap();
         Ok(())
     }

@@ -1,0 +1,5 @@
+# multiply.cem - Test multiplication
+
+# Multiply 6 * 7 = 42
+: product ( -- Int )
+  6 7 * ;
