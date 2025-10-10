@@ -1,14 +1,10 @@
 # Justfile for Cem compiler
-# Install just: brew install just
+# Install just: brew install just (or cargo install just)
 # Run: just build, just test, etc.
 
-# LLVM configuration
-llvm_prefix := "/opt/homebrew/opt/llvm@18"
-library_path := "/opt/homebrew/lib"
-
-# Set environment variables for all commands
-export LLVM_SYS_180_PREFIX := llvm_prefix
-export LIBRARY_PATH := library_path
+# No LLVM environment variables needed!
+# We generate LLVM IR as text and call clang directly.
+# Works with any LLVM version installed on the system.
 
 # Default recipe (runs when you just type 'just')
 default:
@@ -69,14 +65,34 @@ watch:
 # Install development dependencies
 install-deps:
     @echo "Installing development dependencies..."
-    brew install llvm@18 zstd just
+    @if [ "{{os()}}" = "macos" ]; then \
+        echo "macOS: Installing via Homebrew..."; \
+        brew install llvm clang just; \
+    else \
+        echo "Linux: Install LLVM/clang and just using your package manager:"; \
+        echo "  Ubuntu/Debian: sudo apt-get install llvm clang"; \
+        echo "  Fedora/Rocky: sudo dnf install llvm clang"; \
+        echo "  Arch: sudo pacman -S llvm clang"; \
+    fi
     cargo install cargo-watch
 
 # Show LLVM configuration
 show-llvm:
-    @echo "LLVM_SYS_180_PREFIX: {{llvm_prefix}}"
-    @echo "LIBRARY_PATH: {{library_path}}"
-    @{{llvm_prefix}}/bin/llvm-config --version
+    @echo "Checking LLVM installation..."
+    @if command -v clang >/dev/null 2>&1; then \
+        echo "clang version:"; \
+        clang --version | head -1; \
+    else \
+        echo "clang not found!"; \
+    fi
+    @if command -v llvm-config >/dev/null 2>&1; then \
+        echo "LLVM version:"; \
+        llvm-config --version; \
+        echo "LLVM prefix:"; \
+        llvm-config --prefix; \
+    else \
+        echo "llvm-config not found (but not required)"; \
+    fi
 
 # Build documentation
 docs:

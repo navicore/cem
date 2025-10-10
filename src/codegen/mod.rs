@@ -37,6 +37,7 @@ pub use linker::{compile_to_object, link_program};
 
 use crate::ast::{Expr, Program, WordDef};
 use std::fmt::Write as _;
+use std::process::Command;
 
 /// Main code generator
 pub struct CodeGen {
@@ -85,9 +86,19 @@ impl CodeGen {
 
     /// Compile a complete program to LLVM IR
     pub fn compile_program(&mut self, program: &Program) -> CodegenResult<String> {
-        // Emit module header
+        // Emit module header with target triple to match host platform
         writeln!(&mut self.output, "; Cem Compiler - Generated LLVM IR")
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output).unwrap();
+        
+        // Set target triple to match clang's default (prevents warnings)
+        // We query clang directly to get the exact triple it expects
+        let target_triple = Self::get_target_triple().map_err(|e| {
+            CodegenError::LinkerError {
+                message: format!("Failed to detect target triple from clang: {}", e),
+            }
+        })?;
+        writeln!(&mut self.output, "target triple = \"{}\"", target_triple).unwrap();
         writeln!(&mut self.output).unwrap();
 
         // Declare runtime functions
@@ -99,6 +110,33 @@ impl CodeGen {
         }
 
         Ok(self.output.clone())
+    }
+    
+    /// Get the target triple by querying clang
+    /// 
+    /// This ensures we match clang's exact default target, avoiding warnings
+    /// about target triple mismatches when compiling LLVM IR.
+    /// 
+    /// # Returns
+    /// 
+    /// The target triple string (e.g., "x86_64-apple-darwin" or "x86_64-redhat-linux-gnu")
+    /// 
+    /// # Errors
+    /// 
+    /// Returns an error if clang is not found or fails to report its target
+    fn get_target_triple() -> Result<String, std::io::Error> {
+        let output = Command::new("clang")
+            .arg("-dumpmachine")
+            .output()?;
+            
+        if output.status.success() {
+            Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "clang -dumpmachine failed"
+            ))
+        }
     }
 
     /// Emit declarations for all runtime functions
@@ -284,6 +322,8 @@ mod tests {
         assert!(ir.contains("call ptr @push_int"));
         assert!(ir.contains("i64 5"));
         assert!(ir.contains("ret ptr"));
+        // Should contain target triple
+        assert!(ir.contains("target triple"));
     }
 
     #[test]
@@ -313,5 +353,70 @@ mod tests {
         assert!(ir.contains("@double"));
         assert!(ir.contains("call ptr @dup"));
         assert!(ir.contains("call ptr @add"));
+    }
+
+    #[test]
+    fn test_get_target_triple() {
+        // Test that we can successfully query clang for target triple
+        let result = CodeGen::get_target_triple();
+        
+        assert!(result.is_ok(), "Failed to get target triple from clang");
+        
+        let triple = result.unwrap();
+        
+        // Target triple should be non-empty
+        assert!(!triple.is_empty(), "Target triple should not be empty");
+        
+        // Should contain architecture (common patterns)
+        assert!(
+            triple.contains("x86_64") 
+            || triple.contains("aarch64") 
+            || triple.contains("arm64")
+            || triple.contains("i686"),
+            "Target triple should contain a known architecture, got: {}",
+            triple
+        );
+        
+        // Should contain OS (common patterns)
+        assert!(
+            triple.contains("linux") 
+            || triple.contains("darwin") 
+            || triple.contains("windows")
+            || triple.contains("freebsd"),
+            "Target triple should contain a known OS, got: {}",
+            triple
+        );
+    }
+
+    #[test]
+    fn test_target_triple_in_generated_ir() {
+        let mut codegen = CodeGen::new();
+        
+        let word = WordDef {
+            name: "test".to_string(),
+            effect: Effect {
+                inputs: StackType::Empty,
+                outputs: StackType::Empty,
+            },
+            body: vec![],
+        };
+        
+        let program = Program {
+            type_defs: vec![],
+            word_defs: vec![word],
+        };
+        
+        let ir = codegen.compile_program(&program).unwrap();
+        
+        // Verify that target triple is present in the IR
+        assert!(ir.contains("target triple = \""), "IR should contain target triple declaration");
+        
+        // Extract the target triple from IR and verify it matches what clang reports
+        let expected_triple = CodeGen::get_target_triple().unwrap();
+        assert!(
+            ir.contains(&format!("target triple = \"{}\"", expected_triple)),
+            "IR should contain the correct target triple: {}",
+            expected_triple
+        );
     }
 }
