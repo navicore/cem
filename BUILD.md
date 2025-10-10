@@ -2,16 +2,27 @@
 
 This document explains how to build the Cem compiler.
 
+## Architecture Note
+
+Cem generates LLVM IR as text and invokes `clang` as a subprocess, rather than using Rust FFI bindings. This means:
+- ✅ Works with **any LLVM version** (18, 19, 20, 21+)
+- ✅ No complex FFI dependencies (no inkwell, no llvm-sys)
+- ✅ Simpler setup and maintenance
+
+See `docs/LLVM_TEXT_IR.md` for the full rationale.
+
 ## Prerequisites
+
+You need:
+1. **Rust toolchain** (install from https://rustup.rs)
+2. **clang** (LLVM's C compiler) - any recent version works
+3. **just** (optional, for convenient commands)
 
 ### macOS (Homebrew)
 
 ```bash
-# Install LLVM 18 (required for inkwell)
-brew install llvm@18
-
-# Install zstd (required for linking)
-brew install zstd
+# Install LLVM/clang (any version works, 18+ recommended)
+brew install llvm
 
 # Optional: Install just for easier commands
 brew install just
@@ -21,20 +32,20 @@ brew install just
 
 ```bash
 # Ubuntu/Debian
-sudo apt-get install llvm-18 llvm-18-dev libzstd-dev
+sudo apt-get install clang
 
-# Fedora
-sudo dnf install llvm18 llvm18-devel libzstd-devel
+# Fedora/Rocky/RHEL
+sudo dnf install clang
 
 # Arch
-sudo pacman -S llvm18 zstd
+sudo pacman -S clang
 ```
+
+**Note**: Most Linux distributions come with clang pre-installed or available in standard repos.
 
 ## Building
 
 ### Option 1: Using `just` (Recommended)
-
-The `justfile` handles LLVM paths automatically for macOS:
 
 ```bash
 # Build the project
@@ -55,83 +66,63 @@ just
 
 ### Option 2: Using `cargo` directly
 
-Set the LLVM path first:
-
 ```bash
-# macOS (Homebrew)
-export LLVM_SYS_180_PREFIX=/opt/homebrew/opt/llvm@18
-export LIBRARY_PATH=/opt/homebrew/lib
-
-# Linux (Ubuntu/Debian)
-export LLVM_SYS_180_PREFIX=/usr/lib/llvm-18
-
-# Then use cargo
+# Build
 cargo build
+
+# Run tests
 cargo test
+
+# Build in release mode
 cargo build --release
 ```
 
-**Tip**: Add the export commands to your shell profile (`~/.zshrc` or `~/.bashrc`) to avoid setting them every time.
-
-## Build Configuration
-
-The LLVM paths must be set via environment variables:
-
-1. **`LLVM_SYS_180_PREFIX`**: Path to your LLVM 18 installation (required)
-2. **`LIBRARY_PATH`**: Library search path for linking dependencies like zstd
-
-The `justfile` sets these automatically for macOS Homebrew users. For other platforms or custom LLVM installations, set them manually before running `cargo`.
-
-## Troubleshooting
-
-### "No suitable version of LLVM was found"
-
-**Solution**: Install LLVM 18 and set `LLVM_SYS_180_PREFIX`:
-
-```bash
-# Find your LLVM installation
-brew --prefix llvm@18   # macOS
-which llvm-config-18    # Linux
-
-# Set the environment variable
-export LLVM_SYS_180_PREFIX=$(brew --prefix llvm@18)  # macOS
-export LLVM_SYS_180_PREFIX=/usr/lib/llvm-18          # Linux
-```
-
-### "library 'zstd' not found"
-
-**Solution**: Install zstd and ensure it's in your library path:
-
-```bash
-# macOS
-brew install zstd
-
-# Linux
-sudo apt-get install libzstd-dev  # Debian/Ubuntu
-sudo dnf install libzstd-devel     # Fedora
-```
-
-### Test failures
-
-If tests fail with linking errors, ensure `LIBRARY_PATH` is set:
-
-```bash
-# macOS
-export LIBRARY_PATH="/opt/homebrew/lib:$LIBRARY_PATH"
-
-# Or add to your shell profile (~/.zshrc, ~/.bashrc)
-echo 'export LIBRARY_PATH="/opt/homebrew/lib:$LIBRARY_PATH"' >> ~/.zshrc
-```
+**No environment variables needed!** The project automatically detects `clang` on your PATH.
 
 ## Verifying Your Setup
 
 ```bash
-# Check LLVM installation
+# Check LLVM/clang installation
 just show-llvm
 
 # Or manually:
-/opt/homebrew/opt/llvm@18/bin/llvm-config --version  # Should show 18.x.x
+clang --version  # Should show any recent version (18+, 19+, etc.)
 ```
+
+## Troubleshooting
+
+### "clang: command not found"
+
+**Solution**: Install LLVM/clang for your platform:
+
+```bash
+# macOS
+brew install llvm
+
+# Ubuntu/Debian
+sudo apt-get install clang
+
+# Fedora/Rocky
+sudo dnf install clang
+
+# Arch
+sudo pacman -S clang
+```
+
+### Integration test failures
+
+If integration tests fail with compilation errors, ensure:
+1. `clang` is in your PATH: `which clang`
+2. You can compile C code: `echo 'int main(){}' | clang -x c -`
+
+### Runtime compilation warnings
+
+You may see warnings like:
+```
+warning: overriding the module target triple with x86_64-...
+```
+
+These are harmless and can be ignored. They're due to LLVM's target detection.
 
 ## Development Workflow
 
@@ -153,15 +144,25 @@ just ci
 
 ### VS Code
 
-Install the `rust-analyzer` extension. It should automatically pick up the settings from `.cargo/config.toml`.
+Install the `rust-analyzer` extension. It should work out of the box.
 
 ### CLion / IntelliJ IDEA
 
 The Rust plugin should automatically detect the Cargo configuration.
 
+## Platform Support
+
+Cem builds and runs on:
+- ✅ **macOS** (Intel and Apple Silicon)
+- ✅ **Linux** (Ubuntu, Debian, Fedora, Rocky, Arch, etc.)
+- ✅ **Any platform** with Rust + clang installed
+
+The text IR approach ensures LLVM version compatibility is never an issue.
+
 ## Next Steps
 
 After successful build, see:
 - `README.md` - Project overview and language features
+- `docs/LLVM_TEXT_IR.md` - Why we use text IR instead of FFI
 - `docs/SELF_HOSTING.md` - Long-term vision
 - `stdlib/` - Standard library implementation
