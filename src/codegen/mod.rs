@@ -234,6 +234,23 @@ impl CodeGen {
         Ok(())
     }
 
+    /// Compile a quotation in a branch (then/else)
+    /// Returns the final stack variable name
+    fn compile_branch_quotation(&mut self, quot: &Expr, initial_stack: &str) -> CodegenResult<String> {
+        match quot {
+            Expr::Quotation(exprs) => {
+                let mut stack_var = initial_stack.to_string();
+                for expr in exprs {
+                    stack_var = self.compile_expr(expr, &stack_var)?;
+                }
+                Ok(stack_var)
+            }
+            _ => Err(CodegenError::InternalError(
+                "If branches must be quotations".to_string()
+            ))
+        }
+    }
+
     /// Compile a single expression, returning the new stack variable name
     fn compile_expr(&mut self, expr: &Expr, stack: &str) -> CodegenResult<String> {
         match expr {
@@ -314,9 +331,69 @@ impl CodeGen {
                 feature: "pattern matching".to_string(),
             }),
 
-            Expr::If { .. } => Err(CodegenError::Unimplemented {
-                feature: "if expressions".to_string(),
-            }),
+            Expr::If { then_branch, else_branch } => {
+                // Stack top must be a Bool
+                // Strategy: extract bool, branch to then/else, both produce same stack effect
+
+                // Generate unique labels
+                let then_label = format!("then_{}", self.temp_counter);
+                let else_label = format!("else_{}", self.temp_counter);
+                let merge_label = format!("merge_{}", self.temp_counter);
+                self.temp_counter += 1;
+
+                // Extract boolean value from stack top
+                // Assume stack cell layout: tag (i32) at offset 0, value union at offset 8
+                let tag_ptr = self.fresh_temp();
+                let tag_val = self.fresh_temp();
+                let bool_ptr = self.fresh_temp();
+                let bool_val = self.fresh_temp();
+                let rest_ptr = self.fresh_temp();
+
+                // StackCell layout in C: tag (i32=4B) + padding (4B) + union (8B) + next (8B) = 24B
+                // LLVM struct: { i32, i32, i64, ptr } to match C layout with padding
+
+                // Get bool value from union - it's stored as bool (i8) at offset 8
+                writeln!(&mut self.output, "  %{} = getelementptr inbounds {{ i32, i32, i64, ptr }}, ptr %{}, i32 0, i32 2", bool_ptr, stack)
+                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                writeln!(&mut self.output, "  %{} = load i64, ptr %{}", bool_val, bool_ptr)
+                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                writeln!(&mut self.output, "  %cond = trunc i64 %{} to i1", bool_val)
+                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                // Get rest of stack (next pointer at offset 16)
+                writeln!(&mut self.output, "  %{} = getelementptr inbounds {{ i32, i32, i64, ptr }}, ptr %{}, i32 0, i32 3", rest_ptr, stack)
+                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                writeln!(&mut self.output, "  %rest = load ptr, ptr %{}", rest_ptr)
+                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                // Branch
+                writeln!(&mut self.output, "  br i1 %cond, label %{}, label %{}", then_label, else_label)
+                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                // Then branch
+                writeln!(&mut self.output, "{}:", then_label)
+                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                let then_stack = self.compile_branch_quotation(then_branch, "rest")?;
+                writeln!(&mut self.output, "  br label %{}", merge_label)
+                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                // Else branch
+                writeln!(&mut self.output, "{}:", else_label)
+                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                let else_stack = self.compile_branch_quotation(else_branch, "rest")?;
+                writeln!(&mut self.output, "  br label %{}", merge_label)
+                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                // Merge point
+                writeln!(&mut self.output, "{}:", merge_label)
+                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                let result = self.fresh_temp();
+                writeln!(&mut self.output, "  %{} = phi ptr [ %{}, %{} ], [ %{}, %{} ]",
+                    result, then_stack, then_label, else_stack, else_label)
+                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                Ok(result)
+            }
 
             Expr::While { .. } => Err(CodegenError::Unimplemented {
                 feature: "while loops".to_string(),

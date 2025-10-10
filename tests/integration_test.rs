@@ -200,3 +200,64 @@ fn test_multiply_executable() {
     std::fs::remove_file("test_product_exe").ok();
     std::fs::remove_file("test_product_exe.ll").ok();
 }
+
+#[test]
+fn test_if_expression() {
+    // Build runtime
+    let runtime_status = Command::new("just")
+        .arg("build-runtime")
+        .status()
+        .expect("Failed to build runtime");
+
+    assert!(runtime_status.success());
+
+    // : abs ( Int -- Int ) dup 0 < if [ 0 swap - ] [ ] ;
+    // Simplified: : test_if ( -- Int ) true if [ 42 ] [ 0 ] ;
+    let word = WordDef {
+        name: "test_if".to_string(),
+        effect: Effect {
+            inputs: StackType::Empty,
+            outputs: StackType::Empty.push(Type::Int),
+        },
+        body: vec![
+            Expr::BoolLit(true),
+            Expr::If {
+                then_branch: Box::new(Expr::Quotation(vec![Expr::IntLit(42)])),
+                else_branch: Box::new(Expr::Quotation(vec![Expr::IntLit(0)])),
+            },
+        ],
+    };
+
+    let program = Program {
+        type_defs: vec![],
+        word_defs: vec![word],
+    };
+
+    // Generate and link
+    let mut codegen = CodeGen::new();
+    let ir = codegen.compile_program_with_main(&program, Some("test_if"))
+        .expect("Failed to generate IR");
+
+    // Verify IR contains if/then/else structure
+    assert!(ir.contains("br i1 %cond"));
+    assert!(ir.contains("then_"));
+    assert!(ir.contains("else_"));
+    assert!(ir.contains("merge_"));
+    assert!(ir.contains("phi ptr"));
+
+    link_program(&ir, "runtime/libcem_runtime.a", "test_if_exe")
+        .expect("Failed to link");
+
+    // Run and check output - should print 42 (true branch)
+    let output = Command::new("./test_if_exe")
+        .output()
+        .expect("Failed to run executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("42"), "Expected 42 from true branch, got: {}", stdout);
+
+    // Clean up
+    std::fs::remove_file("test_if_exe").ok();
+    std::fs::remove_file("test_if_exe.ll").ok();
+}
