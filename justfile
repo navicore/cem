@@ -89,3 +89,22 @@ bench:
 # Full CI check (what CI will run)
 ci: fmt lint test
     @echo "✅ All CI checks passed!"
+
+# Build the C runtime library
+build-runtime:
+    @echo "Building C runtime library..."
+    cd runtime && clang -Wall -Wextra -std=c11 -g -O2 -c stack.c -o stack.o
+    cd runtime && ar rcs libcem_runtime.a stack.o
+    @echo "✅ Built runtime/libcem_runtime.a"
+
+# Build runtime test program
+test-runtime: build-runtime
+    @echo "Building runtime test..."
+    cd runtime && clang -Wall -Wextra -std=c11 -g test_runtime.c -L. -lcem_runtime -o test_runtime
+    cd runtime && ./test_runtime
+    @echo "✅ Runtime tests passed"
+
+# Clean runtime build artifacts
+clean-runtime:
+    rm -f runtime/*.o runtime/*.a runtime/test_runtime
+    @echo "Cleaned runtime artifacts"

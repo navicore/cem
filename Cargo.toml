@@ -4,5 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-# Using inkwell with LLVM 18 (stable and well-supported)
-inkwell = { version = "0.5", features = ["llvm18-0"] }
+# No external dependencies! We generate LLVM IR as text and call clang directly.
+# This works with any LLVM version (10, 15, 18, 19, 21+)
+# See docs/LLVM_TEXT_IR.md for rationale.
