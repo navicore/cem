@@ -37,6 +37,7 @@ pub use linker::{compile_to_object, link_program};
 
 use crate::ast::{Expr, Program, WordDef};
 use std::fmt::Write as _;
+use std::process::Command;
 
 /// Main code generator
 pub struct CodeGen {
@@ -85,10 +86,17 @@ impl CodeGen {
 
     /// Compile a complete program to LLVM IR
     pub fn compile_program(&mut self, program: &Program) -> CodegenResult<String> {
-        // Emit module header
+        // Emit module header with target triple to match host platform
         writeln!(&mut self.output, "; Cem Compiler - Generated LLVM IR")
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
         writeln!(&mut self.output).unwrap();
+        
+        // Set target triple to match clang's default (prevents warnings)
+        // We query clang directly to get the exact triple it expects
+        if let Ok(target_triple) = Self::get_target_triple() {
+            writeln!(&mut self.output, "target triple = \"{}\"", target_triple).unwrap();
+            writeln!(&mut self.output).unwrap();
+        }
 
         // Declare runtime functions
         self.emit_runtime_declarations()?;
@@ -99,6 +107,23 @@ impl CodeGen {
         }
 
         Ok(self.output.clone())
+    }
+    
+    /// Get the target triple by querying clang
+    /// This ensures we match clang's exact default, avoiding warnings
+    fn get_target_triple() -> Result<String, std::io::Error> {
+        let output = Command::new("clang")
+            .arg("-dumpmachine")
+            .output()?;
+            
+        if output.status.success() {
+            Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "Failed to get target triple from clang"
+            ))
+        }
     }
 
     /// Emit declarations for all runtime functions
