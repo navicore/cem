@@ -102,6 +102,7 @@ StackCell* dup(StackCell* stack) {
         case TAG_STRING:
             new_cell->value.s = strdup(stack->value.s);
             if (!new_cell->value.s) {
+                free_cell(new_cell);
                 runtime_error("dup: out of memory");
             }
             break;
@@ -110,6 +111,7 @@ StackCell* dup(StackCell* stack) {
             break;
         case TAG_VARIANT:
             // TODO: Implement variant copying
+            free_cell(new_cell);
             runtime_error("dup: variant copying not yet implemented");
             break;
     }
@@ -163,6 +165,7 @@ StackCell* over(StackCell* stack) {
         case TAG_STRING:
             new_cell->value.s = strdup(second->value.s);
             if (!new_cell->value.s) {
+                free_cell(new_cell);
                 runtime_error("over: out of memory");
             }
             break;
@@ -170,6 +173,7 @@ StackCell* over(StackCell* stack) {
             new_cell->value.quotation = second->value.quotation;
             break;
         case TAG_VARIANT:
+            free_cell(new_cell);
             runtime_error("over: variant copying not yet implemented");
             break;
     }
