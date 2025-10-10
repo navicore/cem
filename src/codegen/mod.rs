@@ -182,7 +182,9 @@ impl CodeGen {
                 // Create global string constant
                 let str_global = format!("@.str.{}", self.temp_counter);
                 let escaped = Self::escape_llvm_string(s);
-                // Calculate actual byte length after escaping
+                // Length is original byte count - escaping is just text representation.
+                // E.g., "a\"b" is 3 bytes even though we write it as 5 chars in IR text.
+                // UTF-8 chars like "😀" (4 bytes) escape to "\F0\9F\98\80" but still represent 4 bytes.
                 let str_len = s.as_bytes().len() + 1; // +1 for null terminator
 
                 // Emit global at top of file (we'll prepend it later)

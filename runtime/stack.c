@@ -162,6 +162,9 @@ StackCell* over(StackCell* stack) {
             break;
         case TAG_STRING:
             new_cell->value.s = strdup(second->value.s);
+            if (!new_cell->value.s) {
+                runtime_error("over: out of memory");
+            }
             break;
         case TAG_QUOTATION:
             new_cell->value.quotation = second->value.quotation;

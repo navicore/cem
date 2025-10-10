@@ -9,7 +9,32 @@ This module handles:
 
 use super::{CodegenError, CodegenResult};
 use std::fs;
+use std::path::Path;
 use std::process::Command;
+
+/// Validate a file path to prevent command injection
+///
+/// Rejects paths that:
+/// - Start with '-' (would be interpreted as flags)
+/// - Contain '..' (directory traversal)
+fn validate_path(path: &str) -> CodegenResult<()> {
+    if path.starts_with('-') {
+        return Err(CodegenError::LinkerError {
+            message: format!("Invalid path '{}': cannot start with '-'", path),
+        });
+    }
+
+    let path_obj = Path::new(path);
+    for component in path_obj.components() {
+        if component.as_os_str() == ".." {
+            return Err(CodegenError::LinkerError {
+                message: format!("Invalid path '{}': cannot contain '..'", path),
+            });
+        }
+    }
+
+    Ok(())
+}
 
 /// Link LLVM IR with C runtime to produce executable
 ///
@@ -26,6 +51,10 @@ use std::process::Command;
 /// link_program(ir, "runtime/libcem_runtime.a", "program").unwrap();
 /// ```
 pub fn link_program(ir_code: &str, runtime_lib: &str, output: &str) -> CodegenResult<()> {
+    // Validate paths to prevent command injection
+    validate_path(runtime_lib)?;
+    validate_path(output)?;
+
     // Write IR to temporary .ll file
     let ll_file = format!("{}.ll", output);
     fs::write(&ll_file, ir_code).map_err(|e| CodegenError::LinkerError {
@@ -66,6 +95,9 @@ pub fn link_program_default(ir_code: &str, output: &str) -> CodegenResult<()> {
 ///
 /// This is useful for testing IR generation without needing a complete program with main()
 pub fn compile_to_object(ir_code: &str, output: &str) -> CodegenResult<()> {
+    // Validate path to prevent command injection
+    validate_path(output)?;
+
     // Write IR to temporary .ll file
     let ll_file = format!("{}.ll", output);
     fs::write(&ll_file, ir_code).map_err(|e| CodegenError::LinkerError {
