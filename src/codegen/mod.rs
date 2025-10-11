@@ -408,12 +408,17 @@ impl CodeGen {
                     .map_err(|e| CodegenError::InternalError(e.to_string()))?;
                 writeln!(&mut self.output, "  %{} = load i8, ptr %{}", bool_val, bool_ptr)
                     .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                // TODO: Using hardcoded %cond causes collisions in nested ifs.
+                // See docs/KNOWN_ISSUES.md - "Nested If Expression Variable Collision"
+                // Attempted fix with fresh_temp() causes LLVM IR numbering errors.
                 writeln!(&mut self.output, "  %cond = trunc i8 %{} to i1", bool_val)
                     .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
                 // Get rest of stack (next pointer at field index 3)
                 writeln!(&mut self.output, "  %{} = getelementptr inbounds {{ i32, [4 x i8], [16 x i8], ptr }}, ptr %{}, i32 0, i32 3", rest_ptr, stack)
                     .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                // TODO: Using hardcoded %rest causes collisions in nested ifs.
+                // See docs/KNOWN_ISSUES.md - "Nested If Expression Variable Collision"
                 writeln!(&mut self.output, "  %rest = load ptr, ptr %{}", rest_ptr)
                     .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
