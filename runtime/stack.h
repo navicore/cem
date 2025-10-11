@@ -177,6 +177,12 @@ StackCell* push_bool(StackCell* stack, bool value);
  */
 StackCell* push_string(StackCell* stack, const char* value);
 
+/**
+ * push_quotation ( -- Quotation )
+ * Push a quotation (function pointer) onto the stack
+ */
+StackCell* push_quotation(StackCell* stack, void* func_ptr);
+
 // ============================================================================
 // Control Flow Operations
 // ============================================================================

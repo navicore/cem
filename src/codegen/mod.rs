@@ -182,6 +182,12 @@ impl CodeGen {
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
         writeln!(&mut self.output, "declare ptr @push_string(ptr, ptr)")
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output, "declare ptr @push_quotation(ptr, ptr)")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+        // Control flow operations
+        writeln!(&mut self.output, "declare ptr @call_quotation(ptr)")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
         // Utility functions
         writeln!(&mut self.output, "declare void @print_stack(ptr)")
@@ -388,9 +394,66 @@ impl CodeGen {
                 Ok(result)
             }
 
-            Expr::Quotation(_) => Err(CodegenError::Unimplemented {
-                feature: "quotations".to_string(),
-            }),
+            Expr::Quotation(exprs) => {
+                // Generate an anonymous function for the quotation
+                let quot_name = format!("quot_{}", self.temp_counter);
+                let saved_counter = self.temp_counter;
+                self.temp_counter += 1;
+
+                // Save current output
+                let saved_output = self.output.clone();
+                self.output.clear();
+
+                // Generate the quotation function
+                writeln!(&mut self.output, "define ptr @{}(ptr %stack) {{", quot_name)
+                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                writeln!(&mut self.output, "entry:")
+                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                // Compile the quotation body
+                let mut stack_var = "stack".to_string();
+                let len = exprs.len();
+                for (i, expr) in exprs.iter().enumerate() {
+                    let is_tail = i == len - 1;
+                    stack_var = self.compile_expr_with_context(expr, &stack_var, is_tail)?;
+
+                    // If last expression is a musttail call, return its result
+                    if is_tail {
+                        if let Expr::WordCall(_) = expr {
+                            writeln!(&mut self.output, "  ret ptr %{}", stack_var)
+                                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                        }
+                    }
+                }
+
+                // If we didn't return via musttail, return normally
+                if len == 0 || !matches!(exprs.last(), Some(Expr::WordCall(_))) {
+                    writeln!(&mut self.output, "  ret ptr %{}", stack_var)
+                        .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                }
+
+                writeln!(&mut self.output, "}}")
+                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                writeln!(&mut self.output)
+                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                // Prepend the quotation function to saved output
+                let quot_func = self.output.clone();
+                self.output = saved_output + &quot_func;
+
+                // Restore temp counter for current function
+                self.temp_counter = saved_counter + 1;
+
+                // Now push the function pointer onto the stack
+                let result = self.fresh_temp();
+                writeln!(
+                    &mut self.output,
+                    "  %{} = call ptr @push_quotation(ptr %{}, ptr @{})",
+                    result, stack, quot_name
+                )
+                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                Ok(result)
+            }
 
             Expr::Match { .. } => Err(CodegenError::Unimplemented {
                 feature: "pattern matching".to_string(),
@@ -610,5 +673,44 @@ mod tests {
         // We intentionally omit it to let clang use its default and avoid warnings
         assert!(!ir.contains("target triple"),
             "IR should not contain target triple declaration");
+    }
+
+    #[test]
+    fn test_codegen_quotation() {
+        let mut codegen = CodeGen::new();
+
+        // : test ( -- Int ) [ 5 10 add ] call_quotation ;
+        let word = WordDef {
+            name: "test".to_string(),
+            effect: Effect {
+                inputs: StackType::Empty,
+                outputs: StackType::Empty.push(Type::Int),
+            },
+            body: vec![
+                Expr::Quotation(vec![
+                    Expr::IntLit(5),
+                    Expr::IntLit(10),
+                    Expr::WordCall("add".to_string()),
+                ]),
+                Expr::WordCall("call_quotation".to_string()),
+            ],
+        };
+
+        let program = Program {
+            type_defs: vec![],
+            word_defs: vec![word],
+        };
+
+        let ir = codegen.compile_program(&program).unwrap();
+
+        // Verify quotation function is generated
+        assert!(ir.contains("define ptr @quot_"), "Should generate quotation function");
+        // Verify quotation is pushed
+        assert!(ir.contains("call ptr @push_quotation"), "Should push quotation");
+        // Verify quotation contains the body
+        assert!(ir.contains("call ptr @push_int"), "Quotation should push integers");
+        assert!(ir.contains("call ptr @add"), "Quotation should call add");
+        // Verify call_quotation is called
+        assert!(ir.contains("call ptr @call_quotation"), "Should call call_quotation");
     }
 }

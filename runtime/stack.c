@@ -396,14 +396,36 @@ StackCell* push_string(StackCell* stack, const char* value) {
     return cell;
 }
 
+StackCell* push_quotation(StackCell* stack, void* func_ptr) {
+    StackCell* cell = alloc_cell();
+    cell->tag = TAG_QUOTATION;
+    cell->value.quotation = func_ptr;
+    cell->next = stack;
+    return cell;
+}
+
 // ============================================================================
 // Control Flow Operations (Placeholders)
 // ============================================================================
 
 StackCell* call_quotation(StackCell* stack) {
-    // TODO: Implement when quotations are supported
-    runtime_error("call_quotation: not yet implemented");
-    return stack;
+    if (!stack) {
+        runtime_error("call_quotation: stack underflow");
+    }
+    if (stack->tag != TAG_QUOTATION) {
+        runtime_error("call_quotation: expected quotation on top of stack");
+    }
+
+    // Pop the quotation
+    void* func_ptr = stack->value.quotation;
+    StackCell* rest = stack->next;
+    free(stack);
+
+    // Call the function pointer with the rest of the stack
+    // The function has signature: StackCell* (*)(StackCell*)
+    typedef StackCell* (*QuotationFunc)(StackCell*);
+    QuotationFunc func = (QuotationFunc)func_ptr;
+    return func(rest);
 }
 
 StackCell* if_then_else(StackCell* stack) {
