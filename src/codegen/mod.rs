@@ -294,9 +294,13 @@ impl CodeGen {
                 (".".to_string(), filename.to_string())
             };
 
+            // Escape strings for LLVM IR (backslashes and quotes)
+            let escaped_basename = basename.replace('\\', r"\\").replace('"', r#"\""#);
+            let escaped_directory = directory.replace('\\', r"\\").replace('"', r#"\""#);
+
             writeln!(&mut self.output,
                 "!{} = !DIFile(filename: \"{}\", directory: \"{}\")",
-                metadata_id, basename, directory
+                metadata_id, escaped_basename, escaped_directory
             ).map_err(|e| CodegenError::InternalError(e.to_string()))?;
         }
 

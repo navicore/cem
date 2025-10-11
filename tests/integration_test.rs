@@ -684,3 +684,29 @@ fn test_debug_metadata_emission() {
     assert!(ir.contains("define ptr @fortytwo(ptr %stack) !dbg !"),
             "Function should reference DISubprogram");
 }
+
+#[test]
+fn test_debug_metadata_filename_escaping() {
+    // Test that filenames with special characters are properly escaped
+    let word = WordDef {
+        name: "test".to_string(),
+        effect: Effect {
+            inputs: StackType::Empty,
+            outputs: StackType::Empty.push(Type::Int),
+        },
+        body: vec![Expr::IntLit(42, SourceLoc::new(1, 1, "test\"file.cem".to_string()))],
+        loc: SourceLoc::new(1, 1, "test\"file.cem".to_string()),
+    };
+
+    let program = Program {
+        type_defs: vec![],
+        word_defs: vec![word],
+    };
+
+    let mut codegen = CodeGen::new();
+    let ir = codegen.compile_program(&program).expect("Failed to generate IR");
+
+    // Verify the filename is properly escaped (quote becomes \")
+    assert!(ir.contains(r#"!DIFile(filename: "test\"file.cem""#),
+            "Filename with quotes should be escaped");
+}
