@@ -33,13 +33,33 @@ typedef enum {
  *
  * Represents a single value on the stack.
  * Forms a linked list via the 'next' pointer.
+ *
+ * MEMORY LAYOUT (64-bit):
+ * - tag: 4 bytes (ValueTag/int32_t) at offset 0
+ * - padding: 4 bytes (for union alignment to 8-byte boundary)
+ * - value union: 16 bytes at offset 8
+ *   - int64_t i: 8 bytes
+ *   - bool b: 1 byte (C99 bool from stdbool.h, typically uint8_t)
+ *   - char* s: 8 bytes
+ *   - void* quotation: 8 bytes
+ *   - variant struct: 16 bytes (4-byte tag + 4-byte padding + 8-byte pointer)
+ * - next: 8 bytes (pointer) at offset 24
+ * TOTAL: 32 bytes
+ *
+ * IMPORTANT ABI ASSUMPTIONS for LLVM codegen:
+ * 1. bool is represented as i8 (uint8_t/unsigned char)
+ * 2. bool value is stored at the first byte of the union (offset 8 from struct start)
+ * 3. The union is 16 bytes due to the variant struct being the largest member
+ *
+ * If the C bool type changes (e.g., becomes i32 on some platform), the LLVM
+ * code generation in src/codegen/mod.rs must be updated accordingly.
  */
 typedef struct StackCell {
     ValueTag tag;
 
     union {
         int64_t i;      // Integer value
-        bool b;         // Boolean value
+        bool b;         // Boolean value (ABI: typically uint8_t)
         char* s;        // String value (owned)
         void* quotation; // Quotation (function pointer)
         struct {
