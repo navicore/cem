@@ -474,8 +474,8 @@ fn test_tail_call_in_if_branch() {
     std::fs::remove_file("test_tail_in_if_exe.ll").ok();
 }
 
-// TODO: Fix variable naming issue with nested ifs - cond/rest vars conflict
-// See PR review feedback - this test reveals a bug in temp variable generation
+// TODO: Debug temp variable numbering issue - investigation needed
+// The fix suggested (using fresh_temp for cond/rest) causes numbering gaps
 #[test]
 #[ignore]
 fn test_nested_if_expressions() {
