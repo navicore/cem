@@ -4,6 +4,7 @@ use crate::ast::types::{Effect, Type};
 use crate::ast::{Expr, MatchBranch, Pattern, Program, TypeDef, Variant, WordDef};
 use crate::parser::lexer::{Lexer, Token, TokenKind};
 use std::fmt;
+use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct ParseError {
@@ -26,7 +27,8 @@ pub struct Parser {
     tokens: Vec<Token>,
     current: usize,
     nesting_depth: usize,
-    filename: String,
+    /// Arc-wrapped filename to avoid duplication across all SourceLocs
+    filename: Arc<str>,
 }
 
 impl Parser {
@@ -41,19 +43,19 @@ impl Parser {
             tokens,
             current: 0,
             nesting_depth: 0,
-            filename: filename.to_string(),
+            filename: Arc::from(filename),
         }
     }
 
     /// Helper: Create SourceLoc from current token
     fn current_loc(&self) -> crate::ast::SourceLoc {
         let token = self.peek();
-        crate::ast::SourceLoc::new(token.line, token.column, self.filename.clone())
+        crate::ast::SourceLoc::new(token.line, token.column, Arc::clone(&self.filename))
     }
 
     /// Helper: Create SourceLoc from a specific token
     fn loc_from_token(&self, token: &Token) -> crate::ast::SourceLoc {
-        crate::ast::SourceLoc::new(token.line, token.column, self.filename.clone())
+        crate::ast::SourceLoc::new(token.line, token.column, Arc::clone(&self.filename))
     }
 
     pub fn parse(&mut self) -> Result<Program, ParseError> {
@@ -504,5 +506,101 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.message.contains("nesting depth"));
+    }
+
+    #[test]
+    fn test_source_location_tracking() {
+        // Test that line/column numbers are captured correctly
+        let input = ": test ( -- Int )\n  42 ;";
+        let mut parser = Parser::new_with_filename(input, "test.cem");
+        let program = parser.parse().unwrap();
+
+        // Check word definition location (line 1, column 1 for ':')
+        let word_loc = &program.word_defs[0].loc;
+        assert_eq!(word_loc.line, 1);
+        assert_eq!(word_loc.column, 1);
+        assert_eq!(word_loc.file.as_ref(), "test.cem");
+
+        // Check integer literal location (line 2, column 2 for '42')
+        // The lexer uses 0-based columns internally but reports 1-based
+        match &program.word_defs[0].body[0] {
+            Expr::IntLit(42, loc) => {
+                assert_eq!(loc.line, 2);
+                assert_eq!(loc.column, 2); // Column for '4' in '42' after two spaces
+                assert_eq!(loc.file.as_ref(), "test.cem");
+            }
+            _ => panic!("Expected IntLit"),
+        }
+    }
+
+    #[test]
+    fn test_source_location_shared_filename() {
+        // Test that all locations share the same Arc<str> for filename
+        let input = ": foo ( -- Int ) 1 2 + ;";
+        let mut parser = Parser::new_with_filename(input, "shared.cem");
+        let program = parser.parse().unwrap();
+
+        let word_loc = &program.word_defs[0].loc;
+
+        // Extract locations from expressions
+        let mut locs = vec![word_loc];
+        for expr in &program.word_defs[0].body {
+            locs.push(expr.loc());
+        }
+
+        // Verify all locations point to the same Arc<str> instance
+        // (Arc::ptr_eq checks if they point to the same allocation)
+        for i in 1..locs.len() {
+            assert!(Arc::ptr_eq(&locs[0].file, &locs[i].file),
+                "SourceLoc filenames should share the same Arc allocation");
+        }
+    }
+
+    #[test]
+    fn test_loc_accessor() {
+        // Test the loc() accessor method on Expr
+        let input = ": test ( -- ) 42 true \"hello\" word [ 1 ] ;";
+        let mut parser = Parser::new_with_filename(input, "test.cem");
+        let program = parser.parse().unwrap();
+
+        // Verify loc() works for all expression types
+        for expr in &program.word_defs[0].body {
+            let loc = expr.loc();
+            assert_eq!(loc.file.as_ref(), "test.cem");
+            assert!(loc.line > 0);
+            assert!(loc.column > 0);
+        }
+    }
+
+    #[test]
+    fn test_multiline_location_tracking() {
+        // Test location tracking across multiple lines
+        let input = ":\ntest\n(\n--\nInt\n)\n42\n;";
+        let mut parser = Parser::new(input);
+        let program = parser.parse().unwrap();
+
+        // The integer 42 should be on line 7
+        match &program.word_defs[0].body[0] {
+            Expr::IntLit(42, loc) => {
+                assert_eq!(loc.line, 7, "Integer literal should be on line 7");
+            }
+            _ => panic!("Expected IntLit"),
+        }
+    }
+
+    #[test]
+    fn test_source_loc_unknown() {
+        // Test SourceLoc::unknown() utility
+        let loc = crate::ast::SourceLoc::unknown();
+        assert_eq!(loc.line, 0);
+        assert_eq!(loc.column, 0);
+        assert_eq!(loc.file.as_ref(), "<unknown>");
+    }
+
+    #[test]
+    fn test_source_loc_display() {
+        // Test SourceLoc Display impl
+        let loc = crate::ast::SourceLoc::new(10, 5, "test.cem");
+        assert_eq!(format!("{}", loc), "test.cem:10:5");
     }
 }

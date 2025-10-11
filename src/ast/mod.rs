@@ -6,18 +6,27 @@ This module defines the core AST types representing Cem programs.
 pub mod types;
 
 use std::fmt;
+use std::sync::Arc;
 
 /// Source code location for debugging and error messages
+///
+/// Uses Arc<str> for the filename to avoid duplicating it across the AST.
+/// This is important because a large program may have thousands of AST nodes
+/// all referring to the same file.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SourceLoc {
     pub line: usize,
     pub column: usize,
-    pub file: String,
+    pub file: Arc<str>,
 }
 
 impl SourceLoc {
-    pub fn new(line: usize, column: usize, file: String) -> Self {
-        Self { line, column, file }
+    pub fn new(line: usize, column: usize, file: impl Into<Arc<str>>) -> Self {
+        Self {
+            line,
+            column,
+            file: file.into(),
+        }
     }
 
     /// Create an unknown/synthetic location (for generated code or tests)
@@ -25,16 +34,16 @@ impl SourceLoc {
         Self {
             line: 0,
             column: 0,
-            file: "<unknown>".to_string(),
+            file: Arc::from("<unknown>"),
         }
     }
 
     /// Create a location with just a file (line/column unknown)
-    pub fn file_only(file: String) -> Self {
+    pub fn file_only(file: impl Into<Arc<str>>) -> Self {
         Self {
             line: 1,
             column: 1,
-            file,
+            file: file.into(),
         }
     }
 }
