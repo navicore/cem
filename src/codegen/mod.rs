@@ -99,7 +99,8 @@ impl CodeGen {
         // Emit module header with target triple to match host platform
         writeln!(&mut self.output, "; Cem Compiler - Generated LLVM IR")
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
-        writeln!(&mut self.output).unwrap();
+        writeln!(&mut self.output)
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
         // Set target triple to match clang's default (prevents warnings)
         // We query clang directly to get the exact triple it expects
@@ -108,8 +109,10 @@ impl CodeGen {
                 message: format!("Failed to detect target triple from clang: {}", e),
             }
         })?;
-        writeln!(&mut self.output, "target triple = \"{}\"", target_triple).unwrap();
-        writeln!(&mut self.output).unwrap();
+        writeln!(&mut self.output, "target triple = \"{}\"", target_triple)
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output)
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
         // Declare runtime functions
         self.emit_runtime_declarations()?;
@@ -156,33 +159,43 @@ impl CodeGen {
 
     /// Emit declarations for all runtime functions
     fn emit_runtime_declarations(&mut self) -> CodegenResult<()> {
-        writeln!(&mut self.output, "; Runtime function declarations").unwrap();
+        writeln!(&mut self.output, "; Runtime function declarations")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
         // Stack operations (ptr -> ptr)
         for func in &["dup", "drop", "swap", "over", "rot"] {
-            writeln!(&mut self.output, "declare ptr @{}(ptr)", func).unwrap();
+            writeln!(&mut self.output, "declare ptr @{}(ptr)", func)
+                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
         }
 
         // Arithmetic (ptr -> ptr)
         for func in &["add", "subtract", "multiply", "divide"] {
-            writeln!(&mut self.output, "declare ptr @{}(ptr)", func).unwrap();
+            writeln!(&mut self.output, "declare ptr @{}(ptr)", func)
+                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
         }
 
         // Comparisons (ptr -> ptr)
         for func in &["less_than", "greater_than", "equal"] {
-            writeln!(&mut self.output, "declare ptr @{}(ptr)", func).unwrap();
+            writeln!(&mut self.output, "declare ptr @{}(ptr)", func)
+                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
         }
 
         // Push operations
-        writeln!(&mut self.output, "declare ptr @push_int(ptr, i64)").unwrap();
-        writeln!(&mut self.output, "declare ptr @push_bool(ptr, i1)").unwrap();
-        writeln!(&mut self.output, "declare ptr @push_string(ptr, ptr)").unwrap();
+        writeln!(&mut self.output, "declare ptr @push_int(ptr, i64)")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output, "declare ptr @push_bool(ptr, i1)")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output, "declare ptr @push_string(ptr, ptr)")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
         // Utility functions
-        writeln!(&mut self.output, "declare void @print_stack(ptr)").unwrap();
-        writeln!(&mut self.output, "declare void @free_stack(ptr)").unwrap();
+        writeln!(&mut self.output, "declare void @print_stack(ptr)")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output, "declare void @free_stack(ptr)")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
-        writeln!(&mut self.output).unwrap();
+        writeln!(&mut self.output)
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
         Ok(())
     }
 
@@ -199,15 +212,24 @@ impl CodeGen {
     /// }
     /// ```
     fn emit_main_function(&mut self, entry_word: &str) -> CodegenResult<()> {
-        writeln!(&mut self.output, "; Main function").unwrap();
-        writeln!(&mut self.output, "define i32 @main() {{").unwrap();
-        writeln!(&mut self.output, "entry:").unwrap();
-        writeln!(&mut self.output, "  %stack = call ptr @{}(ptr null)", entry_word).unwrap();
-        writeln!(&mut self.output, "  call void @print_stack(ptr %stack)").unwrap();
-        writeln!(&mut self.output, "  call void @free_stack(ptr %stack)").unwrap();
-        writeln!(&mut self.output, "  ret i32 0").unwrap();
-        writeln!(&mut self.output, "}}").unwrap();
-        writeln!(&mut self.output).unwrap();
+        writeln!(&mut self.output, "; Main function")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output, "define i32 @main() {{")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output, "entry:")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output, "  %stack = call ptr @{}(ptr null)", entry_word)
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output, "  call void @print_stack(ptr %stack)")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output, "  call void @free_stack(ptr %stack)")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output, "  ret i32 0")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output, "}}")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output)
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
         Ok(())
     }
 
@@ -215,8 +237,10 @@ impl CodeGen {
     fn compile_word(&mut self, word: &WordDef) -> CodegenResult<()> {
         self.temp_counter = 0; // Reset for each function
 
-        writeln!(&mut self.output, "define ptr @{}(ptr %stack) {{", word.name).unwrap();
-        writeln!(&mut self.output, "entry:").unwrap();
+        writeln!(&mut self.output, "define ptr @{}(ptr %stack) {{", word.name)
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output, "entry:")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
         let mut stack_var = "stack".to_string();
 
@@ -228,10 +252,13 @@ impl CodeGen {
         }
 
         // Return final stack
-        writeln!(&mut self.output, "  ret ptr %{}", stack_var).unwrap();
+        writeln!(&mut self.output, "  ret ptr %{}", stack_var)
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
-        writeln!(&mut self.output, "}}").unwrap();
-        writeln!(&mut self.output).unwrap();
+        writeln!(&mut self.output, "}}")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output)
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
         Ok(())
     }
@@ -284,7 +311,7 @@ impl CodeGen {
                     "  %{} = call ptr @push_int(ptr %{}, i64 {})",
                     result, stack, n
                 )
-                .unwrap();
+                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
                 Ok(result)
             }
 
@@ -296,7 +323,7 @@ impl CodeGen {
                     "  %{} = call ptr @push_bool(ptr %{}, i1 {})",
                     result, stack, value
                 )
-                .unwrap();
+                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
                 Ok(result)
             }
 
@@ -324,13 +351,13 @@ impl CodeGen {
                     "  %{} = getelementptr inbounds [{} x i8], ptr {}, i32 0, i32 0",
                     ptr_temp, str_len, str_global
                 )
-                .unwrap();
+                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
                 writeln!(
                     &mut self.output,
                     "  %{} = call ptr @push_string(ptr %{}, ptr %{})",
                     result, stack, ptr_temp
                 )
-                .unwrap();
+                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
                 Ok(result)
             }
@@ -342,7 +369,7 @@ impl CodeGen {
                     "  %{} = call ptr @{}(ptr %{})",
                     result, name, stack
                 )
-                .unwrap();
+                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
                 Ok(result)
             }
 
