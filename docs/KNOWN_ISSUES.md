@@ -4,6 +4,26 @@ Currently there are no known issues! 🎉
 
 ---
 
+## Design Decisions & Trade-offs
+
+### Target Triple Warning Suppression
+
+**Decision**: We suppress clang's `-Woverride-module` warning and omit target triple from generated LLVM IR.
+
+**Rationale**: Clang always emits "overriding the module target triple" warning when compiling LLVM IR, regardless of whether we specify a target triple or not:
+- With explicit triple: `clang -dumpmachine` returns `arm64-apple-darwin25.0.0` but clang wants `arm64-apple-macosx26.0.0`
+- Without explicit triple: Clang treats it as empty and warns when overriding
+
+**Trade-off**: Suppressing this warning means we won't see legitimate target mismatch warnings if they occur. However, we consider this acceptable because:
+1. We're compiling for the host platform (same machine running the compiler)
+2. Letting clang use its default target is the safest approach
+3. The warning was cosmetic noise in 100% of real compilation scenarios
+4. Any actual target incompatibility would fail at link time anyway
+
+**Implementation**: See `src/codegen/linker.rs` for `-Wno-override-module` flag usage.
+
+---
+
 ## Recently Fixed Issues
 
 ### Nested If Variable Collision (FIXED ✅)
