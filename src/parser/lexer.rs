@@ -26,7 +26,6 @@ pub enum TokenKind {
     Match,       // match
     End,         // end
     If,          // if
-    While,       // while
     Arrow,       // =>
 
     // Delimiters
@@ -342,7 +341,6 @@ impl Lexer {
             "match" => TokenKind::Match,
             "end" => TokenKind::End,
             "if" => TokenKind::If,
-            "while" => TokenKind::While,
             "true" | "false" => TokenKind::BoolLiteral,
             _ => TokenKind::Ident,
         };
@@ -408,7 +406,6 @@ impl fmt::Display for TokenKind {
             TokenKind::Match => write!(f, "match"),
             TokenKind::End => write!(f, "end"),
             TokenKind::If => write!(f, "if"),
-            TokenKind::While => write!(f, "while"),
             TokenKind::Arrow => write!(f, "=>"),
             TokenKind::LeftParen => write!(f, "("),
             TokenKind::RightParen => write!(f, ")"),

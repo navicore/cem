@@ -10,6 +10,11 @@
 #include <stdio.h>
 #include <string.h>
 
+// Compile-time assertions to verify ABI assumptions
+// The LLVM codegen assumes bool is 1 byte (i8) - verify this at compile time
+_Static_assert(sizeof(bool) == 1, "LLVM codegen assumes bool is 1 byte (i8)");
+_Static_assert(sizeof(StackCell) == 32, "LLVM codegen assumes StackCell is 32 bytes");
+
 // ============================================================================
 // Utility Functions
 // ============================================================================

@@ -296,30 +296,6 @@ impl Parser {
                 })
             }
 
-            TokenKind::While => {
-                self.advance(); // consume 'while'
-
-                // Expect two quotations: condition and body
-                self.consume(&TokenKind::LeftBracket, "Expected '[' for condition")?;
-                let mut cond_exprs = Vec::new();
-                while !self.check(&TokenKind::RightBracket) && !self.is_at_end() {
-                    cond_exprs.push(self.parse_expr()?);
-                }
-                self.consume(&TokenKind::RightBracket, "Expected ']'")?;
-
-                self.consume(&TokenKind::LeftBracket, "Expected '[' for body")?;
-                let mut body_exprs = Vec::new();
-                while !self.check(&TokenKind::RightBracket) && !self.is_at_end() {
-                    body_exprs.push(self.parse_expr()?);
-                }
-                self.consume(&TokenKind::RightBracket, "Expected ']'")?;
-
-                Ok(Expr::While {
-                    condition: Box::new(Expr::Quotation(cond_exprs)),
-                    body: Box::new(Expr::Quotation(body_exprs)),
-                })
-            }
-
             TokenKind::Ident => {
                 let name = token.lexeme.clone();
                 self.advance();

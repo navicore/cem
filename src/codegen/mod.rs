@@ -99,7 +99,8 @@ impl CodeGen {
         // Emit module header with target triple to match host platform
         writeln!(&mut self.output, "; Cem Compiler - Generated LLVM IR")
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
-        writeln!(&mut self.output).unwrap();
+        writeln!(&mut self.output)
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
         // Set target triple to match clang's default (prevents warnings)
         // We query clang directly to get the exact triple it expects
@@ -108,8 +109,10 @@ impl CodeGen {
                 message: format!("Failed to detect target triple from clang: {}", e),
             }
         })?;
-        writeln!(&mut self.output, "target triple = \"{}\"", target_triple).unwrap();
-        writeln!(&mut self.output).unwrap();
+        writeln!(&mut self.output, "target triple = \"{}\"", target_triple)
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output)
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
         // Declare runtime functions
         self.emit_runtime_declarations()?;
@@ -156,33 +159,43 @@ impl CodeGen {
 
     /// Emit declarations for all runtime functions
     fn emit_runtime_declarations(&mut self) -> CodegenResult<()> {
-        writeln!(&mut self.output, "; Runtime function declarations").unwrap();
+        writeln!(&mut self.output, "; Runtime function declarations")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
         // Stack operations (ptr -> ptr)
         for func in &["dup", "drop", "swap", "over", "rot"] {
-            writeln!(&mut self.output, "declare ptr @{}(ptr)", func).unwrap();
+            writeln!(&mut self.output, "declare ptr @{}(ptr)", func)
+                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
         }
 
         // Arithmetic (ptr -> ptr)
         for func in &["add", "subtract", "multiply", "divide"] {
-            writeln!(&mut self.output, "declare ptr @{}(ptr)", func).unwrap();
+            writeln!(&mut self.output, "declare ptr @{}(ptr)", func)
+                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
         }
 
         // Comparisons (ptr -> ptr)
         for func in &["less_than", "greater_than", "equal"] {
-            writeln!(&mut self.output, "declare ptr @{}(ptr)", func).unwrap();
+            writeln!(&mut self.output, "declare ptr @{}(ptr)", func)
+                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
         }
 
         // Push operations
-        writeln!(&mut self.output, "declare ptr @push_int(ptr, i64)").unwrap();
-        writeln!(&mut self.output, "declare ptr @push_bool(ptr, i1)").unwrap();
-        writeln!(&mut self.output, "declare ptr @push_string(ptr, ptr)").unwrap();
+        writeln!(&mut self.output, "declare ptr @push_int(ptr, i64)")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output, "declare ptr @push_bool(ptr, i1)")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output, "declare ptr @push_string(ptr, ptr)")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
         // Utility functions
-        writeln!(&mut self.output, "declare void @print_stack(ptr)").unwrap();
-        writeln!(&mut self.output, "declare void @free_stack(ptr)").unwrap();
+        writeln!(&mut self.output, "declare void @print_stack(ptr)")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output, "declare void @free_stack(ptr)")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
-        writeln!(&mut self.output).unwrap();
+        writeln!(&mut self.output)
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
         Ok(())
     }
 
@@ -199,15 +212,24 @@ impl CodeGen {
     /// }
     /// ```
     fn emit_main_function(&mut self, entry_word: &str) -> CodegenResult<()> {
-        writeln!(&mut self.output, "; Main function").unwrap();
-        writeln!(&mut self.output, "define i32 @main() {{").unwrap();
-        writeln!(&mut self.output, "entry:").unwrap();
-        writeln!(&mut self.output, "  %stack = call ptr @{}(ptr null)", entry_word).unwrap();
-        writeln!(&mut self.output, "  call void @print_stack(ptr %stack)").unwrap();
-        writeln!(&mut self.output, "  call void @free_stack(ptr %stack)").unwrap();
-        writeln!(&mut self.output, "  ret i32 0").unwrap();
-        writeln!(&mut self.output, "}}").unwrap();
-        writeln!(&mut self.output).unwrap();
+        writeln!(&mut self.output, "; Main function")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output, "define i32 @main() {{")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output, "entry:")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output, "  %stack = call ptr @{}(ptr null)", entry_word)
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output, "  call void @print_stack(ptr %stack)")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output, "  call void @free_stack(ptr %stack)")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output, "  ret i32 0")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output, "}}")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output)
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
         Ok(())
     }
 
@@ -215,23 +237,68 @@ impl CodeGen {
     fn compile_word(&mut self, word: &WordDef) -> CodegenResult<()> {
         self.temp_counter = 0; // Reset for each function
 
-        writeln!(&mut self.output, "define ptr @{}(ptr %stack) {{", word.name).unwrap();
-        writeln!(&mut self.output, "entry:").unwrap();
+        writeln!(&mut self.output, "define ptr @{}(ptr %stack) {{", word.name)
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output, "entry:")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
         let mut stack_var = "stack".to_string();
 
-        // Compile each expression in the body
-        for expr in &word.body {
-            stack_var = self.compile_expr(expr, &stack_var)?;
+        // Compile all expressions except possibly the last
+        let body_len = word.body.len();
+        for (i, expr) in word.body.iter().enumerate() {
+            let is_tail = i == body_len - 1;
+            stack_var = self.compile_expr_with_context(expr, &stack_var, is_tail)?;
         }
 
         // Return final stack
-        writeln!(&mut self.output, "  ret ptr %{}", stack_var).unwrap();
+        writeln!(&mut self.output, "  ret ptr %{}", stack_var)
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
-        writeln!(&mut self.output, "}}").unwrap();
-        writeln!(&mut self.output).unwrap();
+        writeln!(&mut self.output, "}}")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output)
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
         Ok(())
+    }
+
+    /// Compile a quotation in a branch (then/else)
+    /// Returns the final stack variable name
+    fn compile_branch_quotation(&mut self, quot: &Expr, initial_stack: &str) -> CodegenResult<String> {
+        match quot {
+            Expr::Quotation(exprs) => {
+                let mut stack_var = initial_stack.to_string();
+                let len = exprs.len();
+                for (i, expr) in exprs.iter().enumerate() {
+                    let is_tail = i == len - 1;  // Track tail position in branch
+                    stack_var = self.compile_expr_with_context(expr, &stack_var, is_tail)?;
+                }
+                Ok(stack_var)
+            }
+            _ => Err(CodegenError::InternalError(
+                "If branches must be quotations".to_string()
+            ))
+        }
+    }
+
+    /// Compile a single expression with tail-call context
+    fn compile_expr_with_context(&mut self, expr: &Expr, stack: &str, in_tail_position: bool) -> CodegenResult<String> {
+        match expr {
+            // Tail-call optimization: if in tail position and calling a word, use musttail
+            Expr::WordCall(name) if in_tail_position => {
+                let result = self.fresh_temp();
+                writeln!(
+                    &mut self.output,
+                    "  %{} = musttail call ptr @{}(ptr %{})",
+                    result, name, stack
+                )
+                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                Ok(result)
+            }
+            // Otherwise, delegate to normal compile_expr
+            _ => self.compile_expr(expr, stack)
+        }
     }
 
     /// Compile a single expression, returning the new stack variable name
@@ -244,7 +311,7 @@ impl CodeGen {
                     "  %{} = call ptr @push_int(ptr %{}, i64 {})",
                     result, stack, n
                 )
-                .unwrap();
+                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
                 Ok(result)
             }
 
@@ -256,7 +323,7 @@ impl CodeGen {
                     "  %{} = call ptr @push_bool(ptr %{}, i1 {})",
                     result, stack, value
                 )
-                .unwrap();
+                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
                 Ok(result)
             }
 
@@ -284,13 +351,13 @@ impl CodeGen {
                     "  %{} = getelementptr inbounds [{} x i8], ptr {}, i32 0, i32 0",
                     ptr_temp, str_len, str_global
                 )
-                .unwrap();
+                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
                 writeln!(
                     &mut self.output,
                     "  %{} = call ptr @push_string(ptr %{}, ptr %{})",
                     result, stack, ptr_temp
                 )
-                .unwrap();
+                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
                 Ok(result)
             }
@@ -302,7 +369,7 @@ impl CodeGen {
                     "  %{} = call ptr @{}(ptr %{})",
                     result, name, stack
                 )
-                .unwrap();
+                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
                 Ok(result)
             }
 
@@ -314,13 +381,76 @@ impl CodeGen {
                 feature: "pattern matching".to_string(),
             }),
 
-            Expr::If { .. } => Err(CodegenError::Unimplemented {
-                feature: "if expressions".to_string(),
-            }),
+            Expr::If { then_branch, else_branch } => {
+                // Stack top must be a Bool
+                // Strategy: extract bool, branch to then/else, both produce same stack effect
 
-            Expr::While { .. } => Err(CodegenError::Unimplemented {
-                feature: "while loops".to_string(),
-            }),
+                // Generate unique labels
+                let then_label = format!("then_{}", self.temp_counter);
+                let else_label = format!("else_{}", self.temp_counter);
+                let merge_label = format!("merge_{}", self.temp_counter);
+                self.temp_counter += 1;
+
+                // Extract boolean value from stack top
+                // StackCell C layout (from runtime/stack.h):
+                //   - tag: i32 at offset 0 (4 bytes)
+                //   - padding: 4 bytes (for union alignment)
+                //   - value union at offset 8 (16 bytes total - largest member is variant struct)
+                //   - next: ptr at offset 24 (8 bytes)
+                // LLVM struct: { i32, [4 x i8], [16 x i8], ptr } = 32 bytes
+                let bool_ptr = self.fresh_temp();
+                let bool_val = self.fresh_temp();
+                let rest_ptr = self.fresh_temp();
+
+                // Get bool value from union at offset 8 (field index 2)
+                // Bool is stored as i8 in the first byte of the 16-byte union
+                writeln!(&mut self.output, "  %{} = getelementptr inbounds {{ i32, [4 x i8], [16 x i8], ptr }}, ptr %{}, i32 0, i32 2, i32 0", bool_ptr, stack)
+                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                writeln!(&mut self.output, "  %{} = load i8, ptr %{}", bool_val, bool_ptr)
+                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                // TODO: Using hardcoded %cond causes collisions in nested ifs.
+                // See docs/KNOWN_ISSUES.md - "Nested If Expression Variable Collision"
+                // Attempted fix with fresh_temp() causes LLVM IR numbering errors.
+                writeln!(&mut self.output, "  %cond = trunc i8 %{} to i1", bool_val)
+                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                // Get rest of stack (next pointer at field index 3)
+                writeln!(&mut self.output, "  %{} = getelementptr inbounds {{ i32, [4 x i8], [16 x i8], ptr }}, ptr %{}, i32 0, i32 3", rest_ptr, stack)
+                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                // TODO: Using hardcoded %rest causes collisions in nested ifs.
+                // See docs/KNOWN_ISSUES.md - "Nested If Expression Variable Collision"
+                writeln!(&mut self.output, "  %rest = load ptr, ptr %{}", rest_ptr)
+                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                // Branch
+                writeln!(&mut self.output, "  br i1 %cond, label %{}, label %{}", then_label, else_label)
+                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                // Then branch
+                writeln!(&mut self.output, "{}:", then_label)
+                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                let then_stack = self.compile_branch_quotation(then_branch, "rest")?;
+                writeln!(&mut self.output, "  br label %{}", merge_label)
+                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                // Else branch
+                writeln!(&mut self.output, "{}:", else_label)
+                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                let else_stack = self.compile_branch_quotation(else_branch, "rest")?;
+                writeln!(&mut self.output, "  br label %{}", merge_label)
+                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                // Merge point
+                writeln!(&mut self.output, "{}:", merge_label)
+                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                let result = self.fresh_temp();
+                writeln!(&mut self.output, "  %{} = phi ptr [ %{}, %{} ], [ %{}, %{} ]",
+                    result, then_stack, then_label, else_stack, else_label)
+                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                Ok(result)
+            }
+
         }
     }
 
