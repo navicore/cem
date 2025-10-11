@@ -36,6 +36,7 @@ can be both safe and practical.
 
 - **Compile-time safety**: Type system catches errors before runtime
 - **Zero-cost abstractions**: LLVM native compilation, no GC
+- **Static linking**: Self-contained binaries with no runtime dependencies
 - **No C stack issues**: Explicit data stack with compile-time bounds
 - **Safe concurrency**: Linear channels prevent data races
 - **Pattern matching**: Destructuring as stack operations

@@ -178,6 +178,68 @@ declare ptr @multiply(ptr)
 clang program.ll runtime/libcem_runtime.a -o program
 ```
 
+## Static Linking: Self-Contained Binaries
+
+Cem produces **statically linked executables** with zero runtime dependencies (beyond system libraries). This follows the modern approach used by Rust and Go.
+
+### How It Works
+
+When linking, we pass the runtime as a static archive (`.a` file):
+
+```bash
+clang program.ll runtime/libcem_runtime.a -o program
+```
+
+**Key points**:
+- `libcem_runtime.a` is a static archive containing compiled C code
+- Clang statically links `.a` files by default when passed directly
+- The entire Cem runtime is embedded into the final binary
+- No `libcem_runtime.so` or external dependencies needed at runtime
+
+### Binary Dependencies
+
+**What's included (statically linked)**:
+- ✅ All Cem runtime code (stack operations, scheduler, I/O)
+- ✅ Your compiled program code
+
+**System dependencies only**:
+- macOS: `libSystem.dylib` (unavoidable - macOS C standard library)
+- Linux: `libc.so.6` (can be eliminated with `-static` if needed)
+
+### Benefits
+
+1. **Deploy anywhere**: Just copy the binary, no installation required
+2. **No version conflicts**: Runtime is locked to the binary
+3. **Predictable behavior**: Same runtime code on every system
+4. **Security**: No runtime library substitution attacks
+5. **Simplicity**: Single file to distribute
+
+### Verification
+
+You can verify static linking by inspecting a compiled binary:
+
+```bash
+# macOS
+otool -L program
+# Output should only show system libraries (libSystem)
+
+# Linux
+ldd program
+# Output should only show libc and ld-linux (no libcem_runtime)
+
+# Check binary is self-contained
+nm program | grep cem_  # Shows runtime symbols are embedded
+```
+
+### Comparison with Other Languages
+
+**Rust**: Statically links stdlib by default (unless using dylib crates)
+**Go**: All Go code statically linked into single binary
+**C/C++**: Usually dynamic linking (our approach is better for distribution)
+**Cem**: Static linking - best of both worlds
+
+This approach ensures Cem binaries are robust, portable, and production-ready from day one.
+
 ## Trade-offs Accepted
 
 ### What We Lose
