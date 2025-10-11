@@ -238,6 +238,7 @@ impl CodeGen {
     /// Compile a word definition to LLVM function
     fn compile_word(&mut self, word: &WordDef) -> CodegenResult<()> {
         self.temp_counter = 0; // Reset for each function
+        self.current_block = "entry".to_string(); // Reset to entry block
 
         writeln!(&mut self.output, "define ptr @{}(ptr %stack) {{", word.name)
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
@@ -265,21 +266,30 @@ impl CodeGen {
         Ok(())
     }
 
-    /// Compile a quotation in a branch (then/else)
-    /// Returns the final stack variable name
-    /// Compile a branch quotation and return (result_var, ends_with_musttail)
+    /// Compile a branch quotation (quotation inside then/else)
+    /// Returns (result_var, ends_with_musttail)
+    ///
+    /// ends_with_musttail is true if the last expression in the quotation
+    /// is a WordCall in tail position (which will be compiled as a musttail call)
     fn compile_branch_quotation(&mut self, quot: &Expr, initial_stack: &str) -> CodegenResult<(String, bool)> {
         match quot {
             Expr::Quotation(exprs) => {
                 let mut stack_var = initial_stack.to_string();
                 let len = exprs.len();
+
+                // Empty quotations don't end with musttail
+                if len == 0 {
+                    return Ok((stack_var, false));
+                }
+
                 let mut ends_with_musttail = false;
 
                 for (i, expr) in exprs.iter().enumerate() {
                     let is_tail = i == len - 1;  // Track tail position in branch
                     stack_var = self.compile_expr_with_context(expr, &stack_var, is_tail)?;
 
-                    // Check if this is a tail call (last expr that is a WordCall)
+                    // Check if the last expression is a WordCall in tail position
+                    // (which compile_expr_with_context will compile as a musttail call)
                     if is_tail {
                         if let Expr::WordCall(_) = expr {
                             ends_with_musttail = true;
