@@ -2,7 +2,10 @@
 
 ## Vision
 
-Cem provides **uniform non-blocking I/O** for stdin/stdout, files, and network through a **green thread scheduler** with **structured concurrency**. All I/O appears synchronous to the programmer but executes asynchronously under the hood.
+Cem provides **uniform non-blocking I/O** for stdin/stdout, files, and network
+through a **green thread scheduler** with **structured concurrency**. All I/O
+appears synchronous to the programmer but executes asynchronously under the
+hood.
 
 ## Core Principles
 
@@ -13,11 +16,13 @@ Cem provides **uniform non-blocking I/O** for stdin/stdout, files, and network t
 
 ## Terminology
 
-- **strand** - A unit of concurrent execution (lightweight thread with its own stack)
+- **strand** - A unit of concurrent execution (lightweight thread with its own
+  stack)
 - **go** - Launch a strand to run concurrently
 - **wait** - Synchronize on a strand, blocking until it completes
 
-These terms are Cem-specific vocabulary, chosen to avoid assumptions from other languages.
+These terms are Cem-specific vocabulary, chosen to avoid assumptions from other
+languages.
 
 ## Execution Model
 
@@ -25,11 +30,8 @@ These terms are Cem-specific vocabulary, chosen to avoid assumptions from other 
 
 Between I/O operations, execution is sequential and deterministic:
 
-```cem
-5 10 add    # Always executes completely
-read_line   # Yields here (I/O operation)
-print       # Resumes here when I/O completes
-```
+```cem 5 10 add    # Always executes completely read_line   # Yields here (I/O
+operation) print       # Resumes here when I/O completes ```
 
 ### I/O Operations as Yield Points
 
@@ -42,15 +44,18 @@ Strands yield ONLY at explicit I/O operations:
 - `accept_connection` - yields until client connects
 - `connect` - yields until connection established
 
-**Key property**: No preemption between I/O operations. If you're doing computation, you own the CPU until you perform I/O.
+**Key property**: No preemption between I/O operations. If you're doing
+computation, you own the CPU until you perform I/O.
 
 ## Execution Order Guarantees
 
 ### Happens-Before Rules
 
-1. **Sequential consistency within a strand**: Operations in a single strand happen in program order
+1. **Sequential consistency within a strand**: Operations in a single strand
+happen in program order
 2. **Go ordering**: `go` happens-before any operation in the spawned strand
-3. **Wait ordering**: Any operation in a strand happens-before `wait` returns in the parent
+3. **Wait ordering**: Any operation in a strand happens-before `wait` returns in
+the parent
 4. **I/O completion**: I/O completion happens-before strand resumption
 
 ### What This Prevents
@@ -58,7 +63,8 @@ Strands yield ONLY at explicit I/O operations:
 Unlike Java's threading model, Cem avoids:
 
 - **Hidden races**: Stacks are isolated, no shared mutable state
-- **Unpredictable interleaving**: You know exactly when yields can happen (at I/O calls)
+- **Unpredictable interleaving**: You know exactly when yields can happen (at
+  I/O calls)
 - **Implicit parallelism**: `go`/`wait` make concurrency visible
 
 ## User-Facing Model
@@ -67,12 +73,10 @@ Unlike Java's threading model, Cem avoids:
 
 Even without explicit parallelism, I/O can overlap:
 
-```cem
-# Server that handles multiple clients
-server_socket "localhost" 8080 bind listen
+```cem # Server that handles multiple clients server_socket "localhost" 8080
+bind listen
 
-[ accept_connection handle_client ] forever
-```
+[ accept_connection handle_client ] forever ```
 
 - Each `accept_connection` yields to scheduler
 - While handling a client, can accept next connection
@@ -83,15 +87,11 @@ server_socket "localhost" 8080 bind listen
 
 Launch concurrent operations explicitly:
 
-```cem
-# Read two files concurrently
-[ "file1.txt" read_file ] go
-[ "file2.txt" read_file ] go
+```cem # Read two files concurrently [ "file1.txt" read_file ] go [ "file2.txt"
+read_file ] go
 
-# Both files read in parallel
-wait swap wait   # Wait for both results
-concat           # Combine results
-```
+# Both files read in parallel wait swap wait   # Wait for both results concat
+# Combine results ```
 
 **Properties**:
 - `go` is explicit (visible in code)
@@ -132,24 +132,16 @@ The scheduler manages strand execution:
 
 Each I/O operation follows this pattern:
 
-```rust
-fn read_line() {
-    // 1. Submit async I/O request
-    let handle = io_uring_submit_read(stdin, buffer);
+```rust fn read_line() { // 1. Submit async I/O request let handle =
+io_uring_submit_read(stdin, buffer);
 
-    // 2. Save current strand state
-    save_strand_state(current_strand);
+    // 2. Save current strand state save_strand_state(current_strand);
 
-    // 3. Register as blocked
-    blocked_map.insert(handle, current_strand);
+    // 3. Register as blocked blocked_map.insert(handle, current_strand);
 
-    // 4. Yield to scheduler
-    scheduler_yield();
+    // 4. Yield to scheduler scheduler_yield();
 
-    // 5. Resume here when I/O completes
-    // Result is already in buffer
-}
-```
+    // 5. Resume here when I/O completes // Result is already in buffer } ```
 
 ### Platform-Specific I/O Backends
 
@@ -167,11 +159,8 @@ All backends provide the same abstraction:
 
 Each strand has its own stack allocation:
 
-```
-Strand 1 Stack: [0x1000 - 0x2000]
-Strand 2 Stack: [0x3000 - 0x4000]
-Strand 3 Stack: [0x5000 - 0x6000]
-```
+``` Strand 1 Stack: [0x1000 - 0x2000] Strand 2 Stack: [0x3000 - 0x4000] Strand 3
+Stack: [0x5000 - 0x6000] ```
 
 **Properties**:
 - No shared mutable state by default
@@ -333,5 +322,4 @@ Should scheduler be strictly FIFO?
 
 ---
 
-**Status**: Design complete ✅
-**Next**: Implement core scheduler (Step 1)
+**Status**: Design complete ✅ **Next**: Implement core scheduler (Step 1)
