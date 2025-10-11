@@ -156,27 +156,51 @@ void scheduler_shutdown(void) {
 //
 // This gives us:
 // ✓ Scheduler infrastructure (ready queue, state machine)
-// ✓ Yield mechanism (setjmp/longjmp within single thread)
-// ✓ Test harness for validation
+// ✓ Basic context structures and lifecycle functions
+// ✓ Test harness for validation (test_yield linkage)
 //
 // NOT yet implemented:
 // ✗ True concurrent strand spawning
 // ✗ Multiple isolated stacks
 // ✗ go/wait primitives
+// ✗ Functional context switching (setjmp/longjmp state not initialized)
+//
+// IMPORTANT: strand_spawn() and strand_yield() are NON-FUNCTIONAL stubs.
+// They will be properly implemented in Phase 2 when I/O integration
+// requires actual concurrency. For now, they exist to:
+// - Validate API design
+// - Allow test_yield() linkage testing
+// - Provide structure for future implementation
 
+#ifdef PHASE_2_CONCURRENCY
+// Phase 2: Full implementation (not yet enabled)
 uint64_t strand_spawn(StackCell* (*entry_func)(StackCell*), StackCell* initial_stack) {
-    // Phase 1: Not yet implemented
-    // Will be enabled in Phase 2 after I/O integration proves the design
+    if (!scheduler_initialized) {
+        runtime_error("strand_spawn: scheduler not initialized");
+    }
+
+    uint64_t id = global_scheduler.next_strand_id++;
+    Strand* strand = strand_alloc(id, initial_stack);
+
+    ready_queue_push(strand);
+    return id;
+}
+#else
+// Phase 1: Stub implementation
+uint64_t strand_spawn(StackCell* (*entry_func)(StackCell*), StackCell* initial_stack) {
     (void)entry_func;
     (void)initial_stack;
-    runtime_error("strand_spawn: not yet implemented (Phase 2)");
+    runtime_error("strand_spawn: not implemented in Phase 1 (requires PHASE_2_CONCURRENCY)");
     return 0;
 }
+#endif
 
 // ============================================================================
 // Yielding
 // ============================================================================
 
+#ifdef PHASE_2_CONCURRENCY
+// Phase 2: Full implementation (not yet enabled)
 void strand_yield(void) {
     if (!scheduler_initialized) {
         runtime_error("strand_yield: scheduler not initialized");
@@ -198,6 +222,19 @@ void strand_yield(void) {
     // Second call: resumed from scheduler
     // Execution continues here after the strand is rescheduled
 }
+#else
+// Phase 1: Stub implementation (non-functional)
+// NOTE: This function is not usable in Phase 1 because:
+// - global_scheduler.scheduler_context is never initialized
+// - No scheduler loop to return to
+// - Calling this would cause undefined behavior (longjmp to uninitialized jmp_buf)
+//
+// It exists as a stub to validate the API design. Do not call directly.
+// Use test_yield() instead, which is a safe no-op for testing.
+void strand_yield(void) {
+    runtime_error("strand_yield: not functional in Phase 1 (use test_yield for testing)");
+}
+#endif
 
 // ============================================================================
 // Scheduler Main Loop

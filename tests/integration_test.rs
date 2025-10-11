@@ -568,7 +568,7 @@ fn test_nested_if_expressions() {
 }
 
 #[test]
-fn test_scheduler_yield() {
+fn test_scheduler_linkage() {
     // Build runtime
     let runtime_status = Command::new("just")
         .arg("build-runtime")
@@ -579,7 +579,8 @@ fn test_scheduler_yield() {
 
     // : test_scheduler ( -- Int )
     //   5 test_yield 10 add ;
-    // Tests that test_yield is callable and doesn't break execution
+    // Tests that test_yield links correctly and doesn't break execution
+    // (Phase 1: test_yield is a no-op, scheduler is not functional yet)
     let word = WordDef {
         name: "test_scheduler".to_string(),
         effect: Effect {

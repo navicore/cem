@@ -103,6 +103,10 @@ See [EXAMPLES.md](EXAMPLES.md) for more code examples.
 
 *(To be added once implementation begins)*
 
+## Debugging
+
+Cem binaries work with standard debuggers (LLDB/GDB) out of the box. You can step through runtime code, set breakpoints, and inspect memory. For Cem-specific debugging features (stack visualization, quotation inspection), see [docs/DEBUGGING.md](docs/DEBUGGING.md).
+
 ## Project Structure
 
 ```

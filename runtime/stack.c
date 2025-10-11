@@ -55,6 +55,19 @@ void free_stack(StackCell* stack) {
 // call stack. However, for a stack machine runtime, errors are typically
 // unrecoverable (stack corruption, type errors, etc.), so exit(1) is
 // acceptable for this phase of development.
+//
+// MEMORY LEAK BEHAVIOR: This function is marked __attribute__((noreturn))
+// and immediately exits the process. Any memory allocated before the error
+// (including partially constructed StackCells) will leak. This is acceptable
+// because:
+// 1. The process terminates immediately (OS reclaims all memory)
+// 2. Runtime errors indicate unrecoverable conditions (type errors, stack
+//    corruption, etc.)
+// 3. Attempting cleanup during error handling could cause further corruption
+//
+// Example: string_concat allocates a temp buffer, then calls push_string.
+// If push_string fails with runtime_error(), the temp buffer leaks. This is
+// safe because exit(1) terminates the process immediately.
 void runtime_error(const char* message) {
     fprintf(stderr, "Runtime error: %s\n", message);
     exit(1);

@@ -233,12 +233,12 @@ nm program | grep cem_  # Shows runtime symbols are embedded
 
 ### Comparison with Other Languages
 
-**Rust**: Statically links stdlib by default (unless using dylib crates)
-**Go**: All Go code statically linked into single binary
-**C/C++**: Usually dynamic linking (our approach is better for distribution)
-**Cem**: Static linking - best of both worlds
+**Rust**: Typically statically links the standard library and most crates (dynamic linking available via dylib)
+**Go**: Produces statically linked binaries by default
+**C/C++**: Commonly uses dynamic linking (though static linking is supported)
+**Cem**: Static linking by default - prioritizes portability and ease of deployment
 
-This approach ensures Cem binaries are robust, portable, and production-ready from day one.
+This approach follows modern best practices for systems languages, ensuring Cem binaries are self-contained and easy to distribute.
 
 ## Trade-offs Accepted
 

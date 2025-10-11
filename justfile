@@ -121,6 +121,13 @@ test-runtime: build-runtime
     cd runtime && ./test_runtime
     @echo "✅ Runtime tests passed"
 
+# Test scheduler infrastructure
+test-scheduler: build-runtime
+    @echo "Building scheduler tests..."
+    cd runtime && clang -Wall -Wextra -std=c11 -g test_scheduler.c -L. -lcem_runtime -o test_scheduler
+    cd runtime && ./test_scheduler
+    @echo "✅ Scheduler tests passed"
+
 # Clean runtime build artifacts
 clean-runtime:
     rm -f runtime/*.o runtime/*.a runtime/test_runtime

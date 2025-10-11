@@ -11,9 +11,35 @@
  * - Simple FIFO ready queue for runnable strands
  * - Context switching via setjmp/longjmp (portable C solution)
  *
- * Phase 1: Core scheduler with synthetic yields (no I/O yet)
- * Phase 2: I/O integration with io_uring/kqueue
- * Phase 3: go/wait primitives for explicit parallelism
+ * PHASE 1 LIMITATIONS (Current):
+ * ==================================
+ * This is a PARTIAL implementation providing infrastructure only:
+ *
+ * ✅ Working:
+ *   - Scheduler initialization/shutdown
+ *   - Ready queue (FIFO operations)
+ *   - Strand state management structures
+ *   - test_yield() for linkage testing (no-op)
+ *
+ * ❌ NOT Working:
+ *   - strand_spawn(): Will call runtime_error() if invoked
+ *   - strand_yield(): Will call runtime_error() if invoked
+ *   - Context switching: jmp_buf contexts never initialized
+ *   - Multi-strand execution: No scheduler loop implemented
+ *
+ * Why These Limitations Exist:
+ * - setjmp/longjmp requires initial context to be set up via actual execution
+ * - Cannot create execution contexts from scratch without makecontext() or asm
+ * - Phase 1 focuses on data structures and API design validation
+ * - Phase 2 will add full context switching when I/O integration requires it
+ *
+ * IMPORTANT: Do NOT call strand_spawn() or strand_yield() in Phase 1.
+ * Use test_yield() for testing runtime linkage only.
+ *
+ * Roadmap:
+ * - Phase 1 (Current): Core scheduler infrastructure
+ * - Phase 2 (Next): I/O integration with io_uring/kqueue + functional yielding
+ * - Phase 3 (Future): go/wait primitives for explicit parallelism
  */
 
 #ifndef CEM_RUNTIME_SCHEDULER_H
