@@ -63,12 +63,6 @@ pub enum Expr {
         then_branch: Box<Expr>,
         else_branch: Box<Expr>,
     },
-
-    /// While loop
-    While {
-        condition: Box<Expr>,
-        body: Box<Expr>,
-    },
 }
 
 /// A branch in a pattern match
@@ -110,7 +104,6 @@ impl fmt::Display for Expr {
                 write!(f, "end")
             }
             Expr::If { .. } => write!(f, "if"),
-            Expr::While { .. } => write!(f, "while"),
         }
     }
 }

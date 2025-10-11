@@ -220,9 +220,11 @@ impl CodeGen {
 
         let mut stack_var = "stack".to_string();
 
-        // Compile each expression in the body
-        for expr in &word.body {
-            stack_var = self.compile_expr(expr, &stack_var)?;
+        // Compile all expressions except possibly the last
+        let body_len = word.body.len();
+        for (i, expr) in word.body.iter().enumerate() {
+            let is_tail = i == body_len - 1;
+            stack_var = self.compile_expr_with_context(expr, &stack_var, is_tail)?;
         }
 
         // Return final stack
@@ -248,6 +250,25 @@ impl CodeGen {
             _ => Err(CodegenError::InternalError(
                 "If branches must be quotations".to_string()
             ))
+        }
+    }
+
+    /// Compile a single expression with tail-call context
+    fn compile_expr_with_context(&mut self, expr: &Expr, stack: &str, in_tail_position: bool) -> CodegenResult<String> {
+        match expr {
+            // Tail-call optimization: if in tail position and calling a word, use musttail
+            Expr::WordCall(name) if in_tail_position => {
+                let result = self.fresh_temp();
+                writeln!(
+                    &mut self.output,
+                    "  %{} = musttail call ptr @{}(ptr %{})",
+                    result, name, stack
+                )
+                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                Ok(result)
+            }
+            // Otherwise, delegate to normal compile_expr
+            _ => self.compile_expr(expr, stack)
         }
     }
 
@@ -395,9 +416,6 @@ impl CodeGen {
                 Ok(result)
             }
 
-            Expr::While { .. } => Err(CodegenError::Unimplemented {
-                feature: "while loops".to_string(),
-            }),
         }
     }
 

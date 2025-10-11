@@ -136,35 +136,6 @@ impl TypeChecker {
                 Ok(then_stack)
             }
 
-            Expr::While { condition, body } => {
-                // While loop: condition and body must maintain stack shape
-                // This is a simplified check - full check would verify convergence
-                // For now, just verify condition produces Bool and body maintains stack
-                let cond_stack = self.check_expr(condition, stack.clone())?;
-
-                // Pop Bool from condition result
-                let (_stack_after_cond, cond_type) =
-                    cond_stack.pop().ok_or_else(|| TypeError::StackUnderflow {
-                        word: "while".to_string(),
-                        required: 1,
-                        available: 0,
-                    })?;
-
-                unify_types(&cond_type, &Type::Bool).map_err(|_| TypeError::TypeMismatch {
-                    expected: Type::Bool,
-                    actual: cond_type,
-                    context: "while condition".to_string(),
-                })?;
-
-                // Check body maintains stack shape
-                let body_stack = self.check_expr(body, stack.clone())?;
-                let (_, _) =
-                    unify_stack_types(&stack, &body_stack).map_err(|_| TypeError::Other {
-                        message: "while body must maintain stack shape".to_string(),
-                    })?;
-
-                Ok(stack)
-            }
         }
     }
 

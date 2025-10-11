@@ -261,3 +261,67 @@ fn test_if_expression() {
     std::fs::remove_file("test_if_exe").ok();
     std::fs::remove_file("test_if_exe.ll").ok();
 }
+
+#[test]
+fn test_tail_call_optimization() {
+    // Build runtime
+    let runtime_status = Command::new("just")
+        .arg("build-runtime")
+        .status()
+        .expect("Failed to build runtime");
+
+    assert!(runtime_status.success());
+
+    // Create a simple tail-recursive word that calls itself
+    // : identity ( Int -- Int ) ;  (just returns input)
+    let identity = WordDef {
+        name: "identity".to_string(),
+        effect: Effect {
+            inputs: StackType::Empty.push(Type::Int),
+            outputs: StackType::Empty.push(Type::Int),
+        },
+        body: vec![],  // Identity - does nothing, returns stack as-is
+    };
+
+    // : call_identity ( -- Int ) 42 identity ;
+    let call_identity = WordDef {
+        name: "call_identity".to_string(),
+        effect: Effect {
+            inputs: StackType::Empty,
+            outputs: StackType::Empty.push(Type::Int),
+        },
+        body: vec![
+            Expr::IntLit(42),
+            Expr::WordCall("identity".to_string()),
+        ],
+    };
+
+    let program = Program {
+        type_defs: vec![],
+        word_defs: vec![identity, call_identity],
+    };
+
+    // Generate IR
+    let mut codegen = CodeGen::new();
+    let ir = codegen.compile_program_with_main(&program, Some("call_identity"))
+        .expect("Failed to generate IR");
+
+    // Verify IR contains musttail for the last word call
+    assert!(ir.contains("musttail call"), "Expected musttail optimization for tail call");
+
+    // Link and run to verify it works
+    link_program(&ir, "runtime/libcem_runtime.a", "test_tail_call_exe")
+        .expect("Failed to link");
+
+    let output = Command::new("./test_tail_call_exe")
+        .output()
+        .expect("Failed to run executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("42"), "Expected 42, got: {}", stdout);
+
+    // Clean up
+    std::fs::remove_file("test_tail_call_exe").ok();
+    std::fs::remove_file("test_tail_call_exe.ll").ok();
+}
