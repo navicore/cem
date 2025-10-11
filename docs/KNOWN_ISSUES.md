@@ -1,86 +1,80 @@
 # Known Issues
 
-## Nested If Expression Variable Collision
+Currently there are no known issues! 🎉
 
-**Status**: Open
-**Priority**: High
-**Affects**: Code generation for nested if expressions
+---
 
-### Description
+## Recently Fixed Issues
 
-Currently, nested if expressions will fail to compile due to variable name collisions in the generated LLVM IR. The `compile_expr` function for `Expr::If` uses hardcoded variable names `%cond` and `%rest`, which collide when if expressions are nested.
+### Nested If Variable Collision (FIXED ✅)
 
-### Example
+**Status**: Resolved
+**Fixed in**: Current version
 
-```cem
-: nested_if ( Bool Bool -- Int )
-  if
-    [ if [ 1 ] [ 2 ] ]  # Inner if redefines %cond and %rest
-    [ if [ 3 ] [ 4 ] ]
-  ;
+Previously, nested if expressions caused variable name collisions because hardcoded `%cond` and `%rest` variables were reused. This has been fixed by:
+
+1. Using `fresh_temp()` to generate unique numbered temporaries
+2. Ensuring sequential allocation to avoid LLVM IR numbering gaps
+3. Allocating temp variables immediately before use
+
+The fix ensures all temporary variables have unique names across nested contexts.
+
+### Musttail Followed by Branch (FIXED ✅)
+
+**Status**: Resolved
+**Fixed in**: Current version
+
+Previously, tail calls in if branches were incorrectly followed by a branch to merge:
+
+```llvm
+%7 = musttail call ptr @foo(ptr %6)
+br label %merge_0   # WRONG - musttail must be followed by ret
 ```
 
-### Current Workaround
+This has been fixed. Now `musttail` calls are properly followed by immediate `ret`:
 
-Avoid nesting if expressions. Use multiple words instead:
-
-```cem
-: inner_true ( Bool -- Int )
-  if [ 1 ] [ 2 ] ;
-
-: inner_false ( Bool -- Int )
-  if [ 3 ] [ 4 ] ;
-
-: nested_if ( Bool Bool -- Int )
-  if [ inner_true ] [ inner_false ] ;
+```llvm
+%7 = musttail call ptr @foo(ptr %6)
+ret ptr %7   # CORRECT
 ```
 
-### Attempted Fix
+The fix detects when branches end with tail calls and emits the appropriate control flow.
 
-The obvious fix is to use `fresh_temp()` for these variables:
+### Incorrect Phi Node Predecessors in Nested Ifs (FIXED ✅)
 
-```rust
-let cond_var = self.fresh_temp();
-let rest_var = self.fresh_temp();
+**Status**: Resolved
+**Fixed in**: Current version
+
+**The Root Cause**: When nested if expressions were compiled, the outer if's phi node used incorrect predecessor labels. For example:
+
+```llvm
+merge_6:
+  %14 = phi ptr [ %12, %then_6 ], [ %13, %else_6 ]
+  br label %merge_0
+merge_0:
+  %24 = phi ptr [ %14, %then_0 ], [ %23, %else_0 ]  # WRONG!
 ```
 
-However, this causes LLVM IR numbering errors like:
+The phi node claimed `%14` came from `%then_0`, but it actually came from `%merge_6` (the inner if's merge block). This violated LLVM IR's Control Flow Graph (CFG) requirements.
+
+**Why It Failed**:
+- Without optimization (`-O0`), LLVM didn't strictly validate phi predecessors
+- With optimization (`-O2`), the optimizer relied on correct CFG and crashed (Bus error: 10)
+- This was **not** a clang bug - it was invalid IR generation!
+
+**The Fix**: Track the current basic block label during code generation using `current_block` field. When emitting phi nodes, use the actual predecessor block:
+
+```llvm
+merge_0:
+  %24 = phi ptr [ %14, %merge_6 ], [ %23, %merge_15 ]  # CORRECT!
 ```
-error: instruction expected to be numbered '%5' or greater
-```
 
-### Root Cause
+Now nested if expressions compile correctly with full optimization enabled.
 
-The issue appears to be related to how `temp_counter` interacts with:
-1. Label generation (which increments `temp_counter`)
-2. Temporary variable generation via `fresh_temp()`
-3. Named parameters (`ptr %stack`)
-4. Nested compilation contexts
+**Implementation**:
+- Added `current_block: String` field to `CodeGen` struct
+- Update `current_block` whenever a new block label is emitted
+- Capture predecessor block before branching to merge
+- Use actual predecessors in phi node generation
 
-When we use `fresh_temp()` for `cond` and `rest`, and then pass `rest_var` to `compile_branch_quotation`, something in the numbering sequence gets disrupted, causing gaps or reuse of temp variable numbers.
-
-### Investigation Needed
-
-1. Trace through the exact temp_counter increments during nested if compilation
-2. Understand why hardcoded "cond"/"rest" names work but numbered temps don't
-3. Consider whether we need separate counters for labels vs temps
-4. Investigate if LLVM requires contiguous numbering (0, 1, 2, ...) or allows gaps
-5. Check if named temps (like %cond) vs numbered temps (%5) behave differently
-
-### Test Case
-
-See `test_nested_if_expressions` in `tests/integration_test.rs` (currently marked `#[ignore]`).
-
-### References
-
-- PR #7 review feedback
-- `src/codegen/mod.rs:405-438` - If expression codegen
-- `src/codegen/mod.rs:58-62` - `fresh_temp()` implementation
-- `src/codegen/mod.rs:238` - `temp_counter` reset per word
-
-### Next Steps
-
-1. Create a minimal test case to understand the numbering issue
-2. Review LLVM IR specification for temp variable numbering rules
-3. Consider whether we need a different approach to variable naming in nested contexts
-4. Once fixed, enable `test_nested_if_expressions`
+See `src/codegen/mod.rs:46, 445-507` for details.
