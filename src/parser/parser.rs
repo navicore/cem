@@ -232,38 +232,37 @@ impl Parser {
     }
 
     fn parse_expr_inner(&mut self) -> Result<Expr, ParseError> {
-        let token = self.peek().clone();
-
-        match &token.kind {
+        match &self.peek().kind {
             TokenKind::IntLiteral => {
-                let value = token.lexeme.parse::<i64>().map_err(|_| {
+                let value = self.peek().lexeme.parse::<i64>().map_err(|_| {
+                    let token = self.peek();
                     ParseError {
                         message: format!("Invalid integer: {}", token.lexeme),
                         line: token.line,
                         column: token.column,
                     }
                 })?;
-                let loc = self.loc_from_token(&token);
+                let loc = self.current_loc();
                 self.advance();
                 Ok(Expr::IntLit(value, loc))
             }
 
             TokenKind::BoolLiteral => {
-                let value = token.lexeme == "true";
-                let loc = self.loc_from_token(&token);
+                let value = self.peek().lexeme == "true";
+                let loc = self.current_loc();
                 self.advance();
                 Ok(Expr::BoolLit(value, loc))
             }
 
             TokenKind::StringLiteral => {
-                let value = token.lexeme.clone();
-                let loc = self.loc_from_token(&token);
+                let value = self.peek().lexeme.clone();
+                let loc = self.current_loc();
                 self.advance();
                 Ok(Expr::StringLit(value, loc))
             }
 
             TokenKind::LeftBracket => {
-                let loc = self.loc_from_token(&token);
+                let loc = self.current_loc();
                 self.advance(); // consume '['
                 let mut exprs = Vec::new();
                 while !self.check(&TokenKind::RightBracket) && !self.is_at_end() {
@@ -274,7 +273,7 @@ impl Parser {
             }
 
             TokenKind::Match => {
-                let loc = self.loc_from_token(&token);
+                let loc = self.current_loc();
                 self.advance(); // consume 'match'
                 let mut branches = Vec::new();
 
@@ -301,7 +300,7 @@ impl Parser {
             }
 
             TokenKind::If => {
-                let loc = self.loc_from_token(&token);
+                let loc = self.current_loc();
                 self.advance(); // consume 'if'
 
                 // Expect two quotations: then-branch and else-branch
@@ -329,17 +328,20 @@ impl Parser {
             }
 
             TokenKind::Ident => {
-                let name = token.lexeme.clone();
-                let loc = self.loc_from_token(&token);
+                let name = self.peek().lexeme.clone();
+                let loc = self.current_loc();
                 self.advance();
                 Ok(Expr::WordCall(name, loc))
             }
 
-            _ => Err(ParseError {
-                message: format!("Unexpected token: {:?}", token.kind),
-                line: token.line,
-                column: token.column,
-            }),
+            _ => {
+                let token = self.peek();
+                Err(ParseError {
+                    message: format!("Unexpected token: {:?}", token.kind),
+                    line: token.line,
+                    column: token.column,
+                })
+            }
         }
     }
 
