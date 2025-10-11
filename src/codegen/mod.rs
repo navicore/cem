@@ -44,6 +44,12 @@ pub struct CodeGen {
     output: String,
     temp_counter: usize,
     current_block: String,  // Track the current basic block label we're emitting into
+    metadata_counter: usize, // Counter for debug metadata IDs
+    file_metadata: std::collections::HashMap<String, usize>, // filename -> metadata ID
+    compile_unit_id: Option<usize>, // ID of the DICompileUnit metadata node
+    word_subprograms: Vec<(String, usize, usize, usize)>, // (word_name, file_id, line, subprogram_id)
+    current_subprogram_id: Option<usize>, // ID of the current function's DISubprogram
+    debug_locations: std::collections::HashMap<(usize, usize, usize, usize), usize>, // (file_id, line, col, scope) -> DILocation ID
 }
 
 impl CodeGen {
@@ -53,6 +59,12 @@ impl CodeGen {
             output: String::new(),
             temp_counter: 0,
             current_block: "entry".to_string(),
+            metadata_counter: 0,
+            file_metadata: std::collections::HashMap::new(),
+            compile_unit_id: None,
+            word_subprograms: Vec::new(),
+            current_subprogram_id: None,
+            debug_locations: std::collections::HashMap::new(),
         }
     }
 
@@ -111,6 +123,15 @@ impl CodeGen {
         // Declare runtime functions
         self.emit_runtime_declarations()?;
 
+        // Collect all unique source files from the program
+        let mut source_files = std::collections::HashSet::new();
+        for word in &program.word_defs {
+            source_files.insert(word.loc.file.as_ref());
+        }
+
+        // Emit debug metadata setup
+        self.emit_debug_info_header(&source_files)?;
+
         // Emit all word definitions
         for word in &program.word_defs {
             self.compile_word(word)?;
@@ -120,6 +141,9 @@ impl CodeGen {
         if let Some(word_name) = entry_word {
             self.emit_main_function(word_name)?;
         }
+
+        // Emit debug metadata footer (compile unit and module flags)
+        self.emit_debug_info_footer()?;
 
         Ok(self.output.clone())
     }
@@ -246,12 +270,196 @@ impl CodeGen {
         Ok(())
     }
 
+    /// Emit debug info header: DIFile nodes for each source file
+    fn emit_debug_info_header(&mut self, source_files: &std::collections::HashSet<&str>) -> CodegenResult<()> {
+        writeln!(&mut self.output, "; Debug Information")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output)
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+        // Emit DIFile for each unique source file
+        for filename in source_files {
+            let metadata_id = self.fresh_metadata_id();
+            self.file_metadata.insert(filename.to_string(), metadata_id);
+
+            // Split filename into directory and basename
+            let path = std::path::Path::new(filename);
+            let (directory, basename) = if let Some(parent) = path.parent() {
+                let dir = parent.to_string_lossy();
+                let base = path.file_name().map(|s| s.to_string_lossy()).unwrap_or_default();
+                (dir.to_string(), base.to_string())
+            } else {
+                (".".to_string(), filename.to_string())
+            };
+
+            writeln!(&mut self.output,
+                "!{} = !DIFile(filename: \"{}\", directory: \"{}\")",
+                metadata_id, basename, directory
+            ).map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        }
+
+        writeln!(&mut self.output)
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+        Ok(())
+    }
+
+    /// Emit debug info footer: DICompileUnit, DISubprograms, and module flags
+    fn emit_debug_info_footer(&mut self) -> CodegenResult<()> {
+        writeln!(&mut self.output, "; Debug Info Compile Unit")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+        let cu_id = self.fresh_metadata_id();
+        self.compile_unit_id = Some(cu_id);
+
+        // Get the first file as the main compile unit file (or use a default)
+        let main_file_id = self.file_metadata.values().next().copied().unwrap_or(0);
+
+        writeln!(&mut self.output,
+            "!{} = distinct !DICompileUnit(language: DW_LANG_C, file: !{}, producer: \"Cem Compiler\", isOptimized: false, runtimeVersion: 0, emissionKind: FullDebug)",
+            cu_id, main_file_id
+        ).map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+        // Emit DISubprogram for each word
+        writeln!(&mut self.output)
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output, "; DISubprogram metadata for each word")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+        // Pre-allocate type IDs to avoid borrow checker issues
+        let type_ids: Vec<usize> = (0..self.word_subprograms.len())
+            .map(|_| self.fresh_metadata_id())
+            .collect();
+
+        for (i, (word_name, file_id, line, subprogram_id)) in self.word_subprograms.iter().enumerate() {
+            let type_id = type_ids[i];
+            writeln!(&mut self.output,
+                "!{} = distinct !DISubprogram(name: \"{}\", scope: !{}, file: !{}, line: {}, type: !{}, scopeLine: {}, flags: DIFlagPrototyped, spFlags: DISPFlagDefinition, unit: !{})",
+                subprogram_id, word_name, file_id, file_id, line, type_id, line, cu_id
+            ).map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        }
+
+        // Emit stub type metadata for each function type
+        writeln!(&mut self.output)
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output, "; Type metadata (stubs)")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        for type_id in type_ids {
+            writeln!(&mut self.output, "!{} = !DISubroutineType(types: !{{}})", type_id)
+                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        }
+
+        // Emit DILocation metadata for each source location
+        if !self.debug_locations.is_empty() {
+            writeln!(&mut self.output)
+                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+            writeln!(&mut self.output, "; DILocation metadata")
+                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+            // Sort locations by ID for consistent output
+            let mut locations: Vec<_> = self.debug_locations.iter().collect();
+            locations.sort_by_key(|(_, loc_id)| *loc_id);
+
+            for ((_file_id, line, column, scope_id), loc_id) in locations {
+                writeln!(&mut self.output,
+                    "!{} = !DILocation(line: {}, column: {}, scope: !{})",
+                    loc_id, line, column, scope_id
+                ).map_err(|e| CodegenError::InternalError(e.to_string()))?;
+            }
+        }
+
+        // Emit module flags for debug info
+        writeln!(&mut self.output)
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output, "!llvm.dbg.cu = !{{!{}}}", cu_id)
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+        let flags_id = self.fresh_metadata_id();
+        writeln!(&mut self.output, "!llvm.module.flags = !{{!{}}}", flags_id)
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output, "!{} = !{{i32 2, !\"Debug Info Version\", i32 3}}", flags_id)
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+        writeln!(&mut self.output)
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+        Ok(())
+    }
+
+    /// Generate a fresh metadata ID
+    fn fresh_metadata_id(&mut self) -> usize {
+        let id = self.metadata_counter;
+        self.metadata_counter += 1;
+        id
+    }
+
+    /// Get or create a DILocation for the given source location
+    /// Returns the metadata ID to use in !dbg annotations
+    fn get_debug_location(&mut self, loc: &crate::ast::SourceLoc) -> Option<usize> {
+        // Only create debug locations if we're inside a function
+        let subprogram_id = self.current_subprogram_id?;
+
+        // Get file ID
+        let file_id = self.file_metadata.get(loc.file.as_ref()).copied()?;
+
+        // Include subprogram in the key to allow same line/col in different functions
+        let key = (file_id, loc.line, loc.column, subprogram_id);
+        if let Some(&loc_id) = self.debug_locations.get(&key) {
+            return Some(loc_id);
+        }
+
+        // Create new DILocation
+        let loc_id = self.fresh_metadata_id();
+        self.debug_locations.insert(key, loc_id);
+
+        Some(loc_id)
+    }
+
+    /// Format a !dbg annotation for the given source location
+    /// Returns ", !dbg !N" if location is available, empty string otherwise
+    fn dbg_annotation(&mut self, loc: &crate::ast::SourceLoc) -> String {
+        if let Some(loc_id) = self.get_debug_location(loc) {
+            format!(", !dbg !{}", loc_id)
+        } else {
+            String::new()
+        }
+    }
+
+    /// Register a word for debug metadata emission
+    /// Allocates a subprogram ID and stores info for later emission
+    /// Returns the subprogram ID to attach to the function
+    fn register_word_subprogram(&mut self, word: &WordDef) -> CodegenResult<usize> {
+        let subprogram_id = self.fresh_metadata_id();
+
+        // Get the file metadata ID for this word's source location
+        let file_id = self.file_metadata
+            .get(word.loc.file.as_ref())
+            .copied()
+            .unwrap_or(0);
+
+        self.word_subprograms.push((
+            word.name.clone(),
+            file_id,
+            word.loc.line,
+            subprogram_id,
+        ));
+
+        Ok(subprogram_id)
+    }
+
     /// Compile a word definition to LLVM function
     fn compile_word(&mut self, word: &WordDef) -> CodegenResult<()> {
         self.temp_counter = 0; // Reset for each function
         self.current_block = "entry".to_string(); // Reset to entry block
 
-        writeln!(&mut self.output, "define ptr @{}(ptr %stack) {{", word.name)
+        // Register this word for debug metadata (allocates ID for later emission)
+        let subprogram_id = self.register_word_subprogram(word)?;
+
+        // Set current subprogram for debug location generation
+        self.current_subprogram_id = Some(subprogram_id);
+
+        // Emit function definition with debug metadata attachment
+        writeln!(&mut self.output, "define ptr @{}(ptr %stack) !dbg !{} {{", word.name, subprogram_id)
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
         writeln!(&mut self.output, "entry:")
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
@@ -273,6 +481,9 @@ impl CodeGen {
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
         writeln!(&mut self.output)
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+        // Clear current subprogram
+        self.current_subprogram_id = None;
 
         Ok(())
     }
@@ -319,12 +530,13 @@ impl CodeGen {
     fn compile_expr_with_context(&mut self, expr: &Expr, stack: &str, in_tail_position: bool) -> CodegenResult<String> {
         match expr {
             // Tail-call optimization: if in tail position and calling a word, use musttail
-            Expr::WordCall(name, _loc) if in_tail_position => {
+            Expr::WordCall(name, loc) if in_tail_position => {
                 let result = self.fresh_temp();
+                let dbg = self.dbg_annotation(loc);
                 writeln!(
                     &mut self.output,
-                    "  %{} = musttail call ptr @{}(ptr %{})",
-                    result, name, stack
+                    "  %{} = musttail call ptr @{}(ptr %{}){}",
+                    result, name, stack, dbg
                 )
                 .map_err(|e| CodegenError::InternalError(e.to_string()))?;
                 Ok(result)
@@ -337,30 +549,32 @@ impl CodeGen {
     /// Compile a single expression, returning the new stack variable name
     fn compile_expr(&mut self, expr: &Expr, stack: &str) -> CodegenResult<String> {
         match expr {
-            Expr::IntLit(n, _loc) => {
+            Expr::IntLit(n, loc) => {
                 let result = self.fresh_temp();
+                let dbg = self.dbg_annotation(loc);
                 writeln!(
                     &mut self.output,
-                    "  %{} = call ptr @push_int(ptr %{}, i64 {})",
-                    result, stack, n
+                    "  %{} = call ptr @push_int(ptr %{}, i64 {}){}",
+                    result, stack, n, dbg
                 )
                 .map_err(|e| CodegenError::InternalError(e.to_string()))?;
                 Ok(result)
             }
 
-            Expr::BoolLit(b, _loc) => {
+            Expr::BoolLit(b, loc) => {
                 let result = self.fresh_temp();
                 let value = if *b { 1 } else { 0 };
+                let dbg = self.dbg_annotation(loc);
                 writeln!(
                     &mut self.output,
-                    "  %{} = call ptr @push_bool(ptr %{}, i1 {})",
-                    result, stack, value
+                    "  %{} = call ptr @push_bool(ptr %{}, i1 {}){}",
+                    result, stack, value, dbg
                 )
                 .map_err(|e| CodegenError::InternalError(e.to_string()))?;
                 Ok(result)
             }
 
-            Expr::StringLit(s, _loc) => {
+            Expr::StringLit(s, loc) => {
                 // Create global string constant
                 let str_global = format!("@.str.{}", self.temp_counter);
                 let escaped = Self::escape_llvm_string(s);
@@ -378,29 +592,31 @@ impl CodeGen {
 
                 let result = self.fresh_temp();
                 let ptr_temp = self.fresh_temp();
+                let dbg = self.dbg_annotation(loc);
 
                 writeln!(
                     &mut self.output,
-                    "  %{} = getelementptr inbounds [{} x i8], ptr {}, i32 0, i32 0",
-                    ptr_temp, str_len, str_global
+                    "  %{} = getelementptr inbounds [{} x i8], ptr {}, i32 0, i32 0{}",
+                    ptr_temp, str_len, str_global, dbg
                 )
                 .map_err(|e| CodegenError::InternalError(e.to_string()))?;
                 writeln!(
                     &mut self.output,
-                    "  %{} = call ptr @push_string(ptr %{}, ptr %{})",
-                    result, stack, ptr_temp
+                    "  %{} = call ptr @push_string(ptr %{}, ptr %{}){}",
+                    result, stack, ptr_temp, dbg
                 )
                 .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
                 Ok(result)
             }
 
-            Expr::WordCall(name, _loc) => {
+            Expr::WordCall(name, loc) => {
                 let result = self.fresh_temp();
+                let dbg = self.dbg_annotation(loc);
                 writeln!(
                     &mut self.output,
-                    "  %{} = call ptr @{}(ptr %{})",
-                    result, name, stack
+                    "  %{} = call ptr @{}(ptr %{}){}",
+                    result, name, stack, dbg
                 )
                 .map_err(|e| CodegenError::InternalError(e.to_string()))?;
                 Ok(result)
