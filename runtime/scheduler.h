@@ -9,45 +9,43 @@
  * - Each strand has its own isolated stack (StackCell linked list)
  * - Strands yield only at I/O operations (cooperative, not preemptive)
  * - Simple FIFO ready queue for runnable strands
- * - Context switching via setjmp/longjmp (portable C solution)
+ * - Context switching via ucontext (POSIX makecontext/swapcontext)
  *
- * PHASE 1 LIMITATIONS (Current):
- * ==================================
- * This is a PARTIAL implementation providing infrastructure only:
+ * IMPLEMENTATION PHASES:
+ * =======================
+ * Phase 1: Infrastructure ✅ (Completed)
+ * - Scheduler initialization/shutdown
+ * - Ready queue (FIFO operations)
+ * - Strand state management structures
  *
- * ✅ Working:
- *   - Scheduler initialization/shutdown
- *   - Ready queue (FIFO operations)
- *   - Strand state management structures
- *   - test_yield() for linkage testing (no-op)
+ * Phase 2a: ucontext Context Switching (CURRENT)
+ * - Replace jmp_buf with ucontext_t
+ * - Implement strand_spawn() with makecontext()
+ * - Implement strand_yield() with swapcontext()
+ * - Implement scheduler_run() event loop
+ * - 64KB stacks per strand
+ * - Target: ~10,000 concurrent strands
  *
- * ❌ NOT Working:
- *   - strand_spawn(): Will call runtime_error() if invoked
- *   - strand_yield(): Will call runtime_error() if invoked
- *   - Context switching: jmp_buf contexts never initialized
- *   - Multi-strand execution: No scheduler loop implemented
+ * Phase 2b: Assembly Context Switching (FUTURE)
+ * - Custom x86_64 and ARM64 implementations
+ * - 8KB stacks per strand
+ * - Target: ~100,000 concurrent strands
  *
- * Why These Limitations Exist:
- * - setjmp/longjmp requires initial context to be set up via actual execution
- * - Cannot create execution contexts from scratch without makecontext() or asm
- * - Phase 1 focuses on data structures and API design validation
- * - Phase 2 will add full context switching when I/O integration requires it
+ * Phase 3: Dynamic Stack Growth (FUTURE)
+ * - Segmented stacks with growth on overflow
+ * - 2-4KB initial stacks
+ * - Target: 500,000+ concurrent strands
  *
- * IMPORTANT: Do NOT call strand_spawn() or strand_yield() in Phase 1.
- * Use test_yield() for testing runtime linkage only.
- *
- * Roadmap:
- * - Phase 1 (Current): Core scheduler infrastructure
- * - Phase 2 (Next): I/O integration with io_uring/kqueue + functional yielding
- * - Phase 3 (Future): go/wait primitives for explicit parallelism
+ * See docs/SCHEDULER_IMPLEMENTATION.md for detailed roadmap
  */
 
 #ifndef CEM_RUNTIME_SCHEDULER_H
 #define CEM_RUNTIME_SCHEDULER_H
 
 #include "stack.h"
-#include <setjmp.h>
+#include <ucontext.h>
 #include <stdint.h>
+#include <stddef.h>
 #include <stdbool.h>
 
 // ============================================================================
@@ -58,30 +56,44 @@
  * Strand execution states
  */
 typedef enum {
-    STRAND_READY,      // Ready to run (in ready queue)
-    STRAND_RUNNING,    // Currently executing
-    STRAND_YIELDED,    // Yielded (will be re-queued)
-    STRAND_COMPLETED,  // Finished execution
+    STRAND_READY,          // Ready to run (in ready queue)
+    STRAND_RUNNING,        // Currently executing
+    STRAND_YIELDED,        // Yielded (will be re-queued)
+    STRAND_COMPLETED,      // Finished execution
+    STRAND_BLOCKED_READ,   // Blocked waiting for readable I/O
+    STRAND_BLOCKED_WRITE,  // Blocked waiting for writable I/O
 } StrandState;
 
 /**
  * Strand - A lightweight thread of execution
  *
  * Each strand maintains its own:
- * - Execution context (saved via setjmp/longjmp)
- * - Stack state (pointer to StackCell linked list)
+ * - Execution context (ucontext_t for context switching)
+ * - C stack (malloced memory for C function calls, 64KB in Phase 2a)
+ * - Cem stack (pointer to StackCell linked list)
  * - Current state (ready/running/yielded/completed)
  *
  * Memory layout considerations:
- * - The jmp_buf is platform-specific but typically 200-400 bytes
- * - Stack pointer is just a pointer to the StackCell list (8 bytes)
- * - Total struct size is small (< 512 bytes typically)
+ * Phase 2a:
+ * - ucontext_t: ~1KB (platform-specific)
+ * - C stack: 64KB (allocated via malloc)
+ * - StackCell pointer: 8 bytes
+ * - Total per strand: ~65KB
  */
 typedef struct Strand {
     uint64_t id;              // Unique strand identifier
     StrandState state;        // Current execution state
-    StackCell* stack;         // Strand's isolated stack
-    jmp_buf context;          // Saved execution context
+    StackCell* stack;         // Strand's isolated Cem stack
+    ucontext_t context;       // Execution context for swapcontext
+    void* c_stack;            // Allocated C stack (for context switching)
+    size_t c_stack_size;      // Size of C stack (64KB in Phase 2a)
+
+    // Entry function (for initial context setup)
+    StackCell* (*entry_func)(StackCell*);  // Entry function for this strand
+
+    // I/O blocking state
+    int blocked_fd;           // File descriptor when blocked on I/O (-1 if not blocked)
+
     struct Strand* next;      // Next strand in queue (linked list)
 } Strand;
 
@@ -94,8 +106,11 @@ typedef struct Strand {
  *
  * The scheduler maintains:
  * - Ready queue: FIFO queue of runnable strands
+ * - Blocked list: Strands waiting for I/O events
  * - Current strand: The currently executing strand
  * - Next strand ID: Counter for generating unique IDs
+ * - Scheduler context: The main scheduler's execution context
+ * - kqueue fd: BSD kqueue for async I/O event notifications (macOS/FreeBSD)
  *
  * Note: This is a single-threaded scheduler. All fields are accessed
  * from a single thread, so no locks are needed.
@@ -103,9 +118,11 @@ typedef struct Strand {
 typedef struct {
     Strand* ready_queue_head;   // Head of ready queue (FIFO)
     Strand* ready_queue_tail;   // Tail of ready queue (FIFO)
+    Strand* blocked_list;       // Linked list of strands blocked on I/O
     Strand* current_strand;     // Currently executing strand
     uint64_t next_strand_id;    // Counter for strand IDs
-    jmp_buf scheduler_context;  // Return point for scheduler loop
+    ucontext_t scheduler_context; // Scheduler's main context
+    int kqueue_fd;              // kqueue descriptor for async I/O (-1 if not initialized)
 } Scheduler;
 
 // ============================================================================
@@ -146,6 +163,28 @@ uint64_t strand_spawn(StackCell* (*entry_func)(StackCell*), StackCell* initial_s
  * the main scheduler loop.
  */
 void strand_yield(void);
+
+/**
+ * Block current strand on I/O read operation
+ *
+ * This saves the current execution context, registers the file descriptor
+ * for read events with kqueue, and transfers control back to the scheduler.
+ * When the FD becomes readable, the strand will be moved to the ready queue.
+ *
+ * @param fd - File descriptor to wait for (must be in non-blocking mode)
+ */
+void strand_block_on_read(int fd);
+
+/**
+ * Block current strand on I/O write operation
+ *
+ * This saves the current execution context, registers the file descriptor
+ * for write events with kqueue, and transfers control back to the scheduler.
+ * When the FD becomes writable, the strand will be moved to the ready queue.
+ *
+ * @param fd - File descriptor to wait for (must be in non-blocking mode)
+ */
+void strand_block_on_write(int fd);
 
 /**
  * Run the scheduler until all strands complete
