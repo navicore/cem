@@ -4,7 +4,7 @@ Core type checker for Cem
 Implements bidirectional type checking with stack effect inference.
 */
 use crate::ast::types::{Effect, StackType, Type};
-use crate::ast::{Expr, MatchBranch, Pattern, Program, WordDef};
+use crate::ast::{Expr, MatchBranch, Pattern, Program, SourceLoc, WordDef};
 use crate::typechecker::environment::Environment;
 use crate::typechecker::errors::{TypeError, TypeResult};
 use crate::typechecker::unification::{unify_stack_types, unify_types};
@@ -65,22 +65,22 @@ impl TypeChecker {
     /// Type check an expression, returning the resulting stack type
     fn check_expr(&self, expr: &Expr, stack: StackType) -> TypeResult<StackType> {
         match expr {
-            Expr::IntLit(_) => {
+            Expr::IntLit(_, _) => {
                 // Push Int onto stack
                 Ok(stack.push(Type::Int))
             }
 
-            Expr::BoolLit(_) => {
+            Expr::BoolLit(_, _) => {
                 // Push Bool onto stack
                 Ok(stack.push(Type::Bool))
             }
 
-            Expr::StringLit(_) => {
+            Expr::StringLit(_, _) => {
                 // Push String onto stack
                 Ok(stack.push(Type::String))
             }
 
-            Expr::WordCall(name) => {
+            Expr::WordCall(name, _) => {
                 // Look up word effect
                 let effect = self
                     .env
@@ -91,7 +91,7 @@ impl TypeChecker {
                 self.apply_effect(effect, stack, name)
             }
 
-            Expr::Quotation(_exprs) => {
+            Expr::Quotation(_exprs, _) => {
                 // For now, treat quotations as opaque
                 // In future: infer the quotation's effect
                 // For now: push a generic quotation type
@@ -99,7 +99,7 @@ impl TypeChecker {
                 Ok(stack.push(Type::Quotation(Box::new(quotation_effect))))
             }
 
-            Expr::Match { branches } => {
+            Expr::Match { branches, loc: _ } => {
                 // Pattern matching
                 self.check_match(branches, stack)
             }
@@ -107,6 +107,7 @@ impl TypeChecker {
             Expr::If {
                 then_branch,
                 else_branch,
+                loc: _,
             } => {
                 // Pop Bool from stack
                 let (stack_after_cond, cond_type) =
@@ -367,13 +368,13 @@ mod tests {
         let stack = StackType::empty();
 
         // Int literal
-        let result = checker.check_expr(&Expr::IntLit(42), stack.clone());
+        let result = checker.check_expr(&Expr::IntLit(42, SourceLoc::unknown()), stack.clone());
         assert!(result.is_ok());
         let stack_with_int = result.unwrap();
         assert_eq!(stack_with_int.depth(), Some(1));
 
         // Bool literal
-        let result = checker.check_expr(&Expr::BoolLit(true), stack.clone());
+        let result = checker.check_expr(&Expr::BoolLit(true, SourceLoc::unknown()), stack.clone());
         assert!(result.is_ok());
     }
 
@@ -385,7 +386,7 @@ mod tests {
         let stack = StackType::empty().push(Type::Int);
 
         // Call dup
-        let result = checker.check_expr(&Expr::WordCall("dup".to_string()), stack);
+        let result = checker.check_expr(&Expr::WordCall("dup".to_string(), SourceLoc::unknown()), stack);
         if let Err(e) = &result {
             eprintln!("Error: {:?}", e);
         }
@@ -399,7 +400,7 @@ mod tests {
         let checker = TypeChecker::new();
         let stack = StackType::empty();
 
-        let result = checker.check_expr(&Expr::WordCall("unknown".to_string()), stack);
+        let result = checker.check_expr(&Expr::WordCall("unknown".to_string(), SourceLoc::unknown()), stack);
         assert!(result.is_err());
         match result.unwrap_err() {
             TypeError::UndefinedWord { name } => assert_eq!(name, "unknown"),
@@ -413,7 +414,7 @@ mod tests {
         let stack = StackType::empty(); // Empty stack
 
         // Try to call + which needs 2 ints
-        let result = checker.check_expr(&Expr::WordCall("+".to_string()), stack);
+        let result = checker.check_expr(&Expr::WordCall("+".to_string(), SourceLoc::unknown()), stack);
         assert!(result.is_err());
         match result.unwrap_err() {
             TypeError::StackUnderflow { .. } => (),

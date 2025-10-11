@@ -7,6 +7,44 @@ pub mod types;
 
 use std::fmt;
 
+/// Source code location for debugging and error messages
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SourceLoc {
+    pub line: usize,
+    pub column: usize,
+    pub file: String,
+}
+
+impl SourceLoc {
+    pub fn new(line: usize, column: usize, file: String) -> Self {
+        Self { line, column, file }
+    }
+
+    /// Create an unknown/synthetic location (for generated code or tests)
+    pub fn unknown() -> Self {
+        Self {
+            line: 0,
+            column: 0,
+            file: "<unknown>".to_string(),
+        }
+    }
+
+    /// Create a location with just a file (line/column unknown)
+    pub fn file_only(file: String) -> Self {
+        Self {
+            line: 1,
+            column: 1,
+            file,
+        }
+    }
+}
+
+impl fmt::Display for SourceLoc {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}:{}", self.file, self.line, self.column)
+    }
+}
+
 /// A complete Cem program
 #[derive(Debug, Clone, PartialEq)]
 pub struct Program {
@@ -35,34 +73,54 @@ pub struct WordDef {
     pub name: String,
     pub effect: types::Effect,
     pub body: Vec<Expr>,
+    pub loc: SourceLoc,  // Location of the word definition (: word_name line)
 }
 
 /// Expression in the body of a word
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     /// Literal integer
-    IntLit(i64),
+    IntLit(i64, SourceLoc),
 
     /// Literal boolean
-    BoolLit(bool),
+    BoolLit(bool, SourceLoc),
 
     /// Literal string
-    StringLit(String),
+    StringLit(String, SourceLoc),
 
     /// Word call (reference to another word)
-    WordCall(String),
+    WordCall(String, SourceLoc),
 
     /// Quotation (code block)
-    Quotation(Vec<Expr>),
+    Quotation(Vec<Expr>, SourceLoc),
 
     /// Pattern match expression
-    Match { branches: Vec<MatchBranch> },
+    Match {
+        branches: Vec<MatchBranch>,
+        loc: SourceLoc,
+    },
 
     /// If expression (condition is top of stack)
     If {
         then_branch: Box<Expr>,
         else_branch: Box<Expr>,
+        loc: SourceLoc,
     },
+}
+
+impl Expr {
+    /// Get the source location of any expression
+    pub fn loc(&self) -> &SourceLoc {
+        match self {
+            Expr::IntLit(_, loc) => loc,
+            Expr::BoolLit(_, loc) => loc,
+            Expr::StringLit(_, loc) => loc,
+            Expr::WordCall(_, loc) => loc,
+            Expr::Quotation(_, loc) => loc,
+            Expr::Match { loc, .. } => loc,
+            Expr::If { loc, .. } => loc,
+        }
+    }
 }
 
 /// A branch in a pattern match
@@ -85,18 +143,18 @@ pub enum Pattern {
 impl fmt::Display for Expr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Expr::IntLit(n) => write!(f, "{}", n),
-            Expr::BoolLit(b) => write!(f, "{}", b),
-            Expr::StringLit(s) => write!(f, "\"{}\"", s),
-            Expr::WordCall(name) => write!(f, "{}", name),
-            Expr::Quotation(exprs) => {
+            Expr::IntLit(n, _) => write!(f, "{}", n),
+            Expr::BoolLit(b, _) => write!(f, "{}", b),
+            Expr::StringLit(s, _) => write!(f, "\"{}\"", s),
+            Expr::WordCall(name, _) => write!(f, "{}", name),
+            Expr::Quotation(exprs, _) => {
                 write!(f, "[ ")?;
                 for expr in exprs {
                     write!(f, "{} ", expr)?;
                 }
                 write!(f, "]")
             }
-            Expr::Match { branches } => {
+            Expr::Match { branches, .. } => {
                 writeln!(f, "match")?;
                 for branch in branches {
                     writeln!(f, "  {:?} => [ ... ]", branch.pattern)?;

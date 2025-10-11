@@ -55,7 +55,7 @@ fn test_parse_pattern_match() {
     // Check that body contains a match expression
     assert_eq!(program.word_defs[0].body.len(), 1);
     match &program.word_defs[0].body[0] {
-        Expr::Match { branches } => {
+        Expr::Match { branches, loc: _ } => {
             assert_eq!(branches.len(), 2);
         }
         _ => panic!("Expected Match expression"),

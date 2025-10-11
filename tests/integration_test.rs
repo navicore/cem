@@ -2,7 +2,7 @@
 End-to-end integration test: Cem source → LLVM IR → executable
 */
 
-use cem::ast::{Expr, Program, WordDef};
+use cem::ast::{Expr, Program, SourceLoc, WordDef};
 use cem::ast::types::{Effect, StackType, Type};
 use cem::codegen::{CodeGen, compile_to_object, link_program};
 use std::process::Command;
@@ -24,7 +24,8 @@ fn test_end_to_end_compilation() {
             inputs: StackType::Empty,
             outputs: StackType::Empty.push(Type::Int),
         },
-        body: vec![Expr::IntLit(42)],
+        body: vec![Expr::IntLit(42, SourceLoc::unknown())],
+        loc: SourceLoc::unknown(),
     };
 
     let program = Program {
@@ -68,10 +69,11 @@ fn test_arithmetic_compilation() {
             outputs: StackType::Empty.push(Type::Int),
         },
         body: vec![
-            Expr::IntLit(5),
-            Expr::IntLit(3),
-            Expr::WordCall("add".to_string()),
+            Expr::IntLit(5, SourceLoc::unknown()),
+            Expr::IntLit(3, SourceLoc::unknown()),
+            Expr::WordCall("add".to_string(), SourceLoc::unknown()),
         ],
+        loc: SourceLoc::unknown(),
     };
 
     let program = Program {
@@ -111,7 +113,8 @@ fn test_executable_with_main() {
             inputs: StackType::Empty,
             outputs: StackType::Empty.push(Type::Int),
         },
-        body: vec![Expr::IntLit(42)],
+        body: vec![Expr::IntLit(42, SourceLoc::unknown())],
+        loc: SourceLoc::unknown(),
     };
 
     let program = Program {
@@ -168,10 +171,11 @@ fn test_multiply_executable() {
             outputs: StackType::Empty.push(Type::Int),
         },
         body: vec![
-            Expr::IntLit(6),
-            Expr::IntLit(7),
-            Expr::WordCall("multiply".to_string()),
+            Expr::IntLit(6, SourceLoc::unknown()),
+            Expr::IntLit(7, SourceLoc::unknown()),
+            Expr::WordCall("multiply".to_string(), SourceLoc::unknown()),
         ],
+        loc: SourceLoc::unknown(),
     };
 
     let program = Program {
@@ -220,12 +224,14 @@ fn test_if_expression() {
             outputs: StackType::Empty.push(Type::Int),
         },
         body: vec![
-            Expr::BoolLit(true),
+            Expr::BoolLit(true, SourceLoc::unknown()),
             Expr::If {
-                then_branch: Box::new(Expr::Quotation(vec![Expr::IntLit(42)])),
-                else_branch: Box::new(Expr::Quotation(vec![Expr::IntLit(0)])),
+                then_branch: Box::new(Expr::Quotation(vec![Expr::IntLit(42, SourceLoc::unknown())], SourceLoc::unknown())),
+                else_branch: Box::new(Expr::Quotation(vec![Expr::IntLit(0, SourceLoc::unknown())], SourceLoc::unknown())),
+            loc: SourceLoc::unknown(),
             },
         ],
+        loc: SourceLoc::unknown(),
     };
 
     let program = Program {
@@ -281,6 +287,7 @@ fn test_tail_call_optimization() {
             outputs: StackType::Empty.push(Type::Int),
         },
         body: vec![],  // Identity - does nothing, returns stack as-is
+        loc: SourceLoc::unknown(),
     };
 
     // : call_identity ( -- Int ) 42 identity ;
@@ -291,9 +298,10 @@ fn test_tail_call_optimization() {
             outputs: StackType::Empty.push(Type::Int),
         },
         body: vec![
-            Expr::IntLit(42),
-            Expr::WordCall("identity".to_string()),
+            Expr::IntLit(42, SourceLoc::unknown()),
+            Expr::WordCall("identity".to_string(), SourceLoc::unknown()),
         ],
+        loc: SourceLoc::unknown(),
     };
 
     let program = Program {
@@ -345,12 +353,14 @@ fn test_if_false_branch() {
             outputs: StackType::Empty.push(Type::Int),
         },
         body: vec![
-            Expr::BoolLit(false),  // Push false
+            Expr::BoolLit(false, SourceLoc::unknown()),  // Push false
             Expr::If {
-                then_branch: Box::new(Expr::Quotation(vec![Expr::IntLit(42)])),
-                else_branch: Box::new(Expr::Quotation(vec![Expr::IntLit(99)])),
+                then_branch: Box::new(Expr::Quotation(vec![Expr::IntLit(42, SourceLoc::unknown())], SourceLoc::unknown())),
+                else_branch: Box::new(Expr::Quotation(vec![Expr::IntLit(99, SourceLoc::unknown())], SourceLoc::unknown())),
+            loc: SourceLoc::unknown(),
             },
         ],
+        loc: SourceLoc::unknown(),
     };
 
     let program = Program {
@@ -399,6 +409,7 @@ fn test_tail_call_in_if_branch() {
             outputs: StackType::Empty.push(Type::Int),
         },
         body: vec![],  // Identity - returns stack as-is
+        loc: SourceLoc::unknown(),
     };
 
     // Create a word that calls another word in tail position within an if branch
@@ -416,16 +427,18 @@ fn test_tail_call_in_if_branch() {
                 // Both branches call passthrough in tail position
                 // Then branch: push 42 then call passthrough
                 then_branch: Box::new(Expr::Quotation(vec![
-                    Expr::IntLit(42),
-                    Expr::WordCall("passthrough".to_string()),
-                ])),
+                    Expr::IntLit(42, SourceLoc::unknown()),
+                    Expr::WordCall("passthrough".to_string(), SourceLoc::unknown()),
+                ], SourceLoc::unknown())),
                 // Else branch: push 99 then call passthrough
                 else_branch: Box::new(Expr::Quotation(vec![
-                    Expr::IntLit(99),
-                    Expr::WordCall("passthrough".to_string()),
-                ])),
+                    Expr::IntLit(99, SourceLoc::unknown()),
+                    Expr::WordCall("passthrough".to_string(), SourceLoc::unknown()),
+                ], SourceLoc::unknown())),
+            loc: SourceLoc::unknown(),
             },
         ],
+        loc: SourceLoc::unknown(),
     };
 
     // Entry word that sets up the test: push true, call conditional_call
@@ -437,9 +450,10 @@ fn test_tail_call_in_if_branch() {
             outputs: StackType::Empty.push(Type::Int),
         },
         body: vec![
-            Expr::BoolLit(true),
-            Expr::WordCall("conditional_call".to_string()),
+            Expr::BoolLit(true, SourceLoc::unknown()),
+            Expr::WordCall("conditional_call".to_string(), SourceLoc::unknown()),
         ],
+        loc: SourceLoc::unknown(),
     };
 
     let program = Program {
@@ -503,19 +517,23 @@ fn test_nested_if_expressions() {
                 then_branch: Box::new(Expr::Quotation(vec![
                     // Inner if in then branch
                     Expr::If {
-                        then_branch: Box::new(Expr::Quotation(vec![Expr::IntLit(1)])),
-                        else_branch: Box::new(Expr::Quotation(vec![Expr::IntLit(2)])),
+                        then_branch: Box::new(Expr::Quotation(vec![Expr::IntLit(1, SourceLoc::unknown())], SourceLoc::unknown())),
+                        else_branch: Box::new(Expr::Quotation(vec![Expr::IntLit(2, SourceLoc::unknown())], SourceLoc::unknown())),
+                        loc: SourceLoc::unknown(),
                     },
-                ])),
+                ], SourceLoc::unknown())),
                 else_branch: Box::new(Expr::Quotation(vec![
                     // Inner if in else branch
                     Expr::If {
-                        then_branch: Box::new(Expr::Quotation(vec![Expr::IntLit(3)])),
-                        else_branch: Box::new(Expr::Quotation(vec![Expr::IntLit(4)])),
+                        then_branch: Box::new(Expr::Quotation(vec![Expr::IntLit(3, SourceLoc::unknown())], SourceLoc::unknown())),
+                        else_branch: Box::new(Expr::Quotation(vec![Expr::IntLit(4, SourceLoc::unknown())], SourceLoc::unknown())),
+                        loc: SourceLoc::unknown(),
                     },
-                ])),
+                ], SourceLoc::unknown())),
+                loc: SourceLoc::unknown(),
             },
         ],
+        loc: SourceLoc::unknown(),
     };
 
     // Test case: true, true => should give 1
@@ -526,10 +544,11 @@ fn test_nested_if_expressions() {
             outputs: StackType::Empty.push(Type::Int),
         },
         body: vec![
-            Expr::BoolLit(true),   // Inner condition
-            Expr::BoolLit(true),   // Outer condition
-            Expr::WordCall("nested_if".to_string()),
+            Expr::BoolLit(true, SourceLoc::unknown()),   // Inner condition
+            Expr::BoolLit(true, SourceLoc::unknown()),   // Outer condition
+            Expr::WordCall("nested_if".to_string(), SourceLoc::unknown()),
         ],
+        loc: SourceLoc::unknown(),
     };
 
     let program = Program {
@@ -588,11 +607,12 @@ fn test_scheduler_linkage() {
             outputs: StackType::Empty.push(Type::Int),
         },
         body: vec![
-            Expr::IntLit(5),
-            Expr::WordCall("test_yield".to_string()),
-            Expr::IntLit(10),
-            Expr::WordCall("add".to_string()),
+            Expr::IntLit(5, SourceLoc::unknown()),
+            Expr::WordCall("test_yield".to_string(), SourceLoc::unknown()),
+            Expr::IntLit(10, SourceLoc::unknown()),
+            Expr::WordCall("add".to_string(), SourceLoc::unknown()),
         ],
+        loc: SourceLoc::unknown(),
     };
 
     let program = Program {

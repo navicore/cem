@@ -26,17 +26,34 @@ pub struct Parser {
     tokens: Vec<Token>,
     current: usize,
     nesting_depth: usize,
+    filename: String,
 }
 
 impl Parser {
     pub fn new(input: &str) -> Self {
+        Self::new_with_filename(input, "<input>")
+    }
+
+    pub fn new_with_filename(input: &str, filename: &str) -> Self {
         let mut lexer = Lexer::new(input);
         let tokens = lexer.tokenize();
         Parser {
             tokens,
             current: 0,
             nesting_depth: 0,
+            filename: filename.to_string(),
         }
+    }
+
+    /// Helper: Create SourceLoc from current token
+    fn current_loc(&self) -> crate::ast::SourceLoc {
+        let token = self.peek();
+        crate::ast::SourceLoc::new(token.line, token.column, self.filename.clone())
+    }
+
+    /// Helper: Create SourceLoc from a specific token
+    fn loc_from_token(&self, token: &Token) -> crate::ast::SourceLoc {
+        crate::ast::SourceLoc::new(token.line, token.column, self.filename.clone())
     }
 
     pub fn parse(&mut self) -> Result<Program, ParseError> {
@@ -118,6 +135,7 @@ impl Parser {
     }
 
     fn parse_word_def(&mut self) -> Result<WordDef, ParseError> {
+        let colon_token = self.peek().clone();
         self.consume(&TokenKind::Colon, "Expected ':'")?;
 
         let name = self.consume_ident("Expected word name")?;
@@ -135,7 +153,12 @@ impl Parser {
 
         self.consume_ident_value(";", "Expected ';' at end of word definition")?;
 
-        Ok(WordDef { name, effect, body })
+        Ok(WordDef {
+            name,
+            effect,
+            body,
+            loc: self.loc_from_token(&colon_token),
+        })
     }
 
     fn parse_effect(&mut self) -> Result<Effect, ParseError> {
@@ -209,7 +232,7 @@ impl Parser {
     }
 
     fn parse_expr_inner(&mut self) -> Result<Expr, ParseError> {
-        let token = self.peek();
+        let token = self.peek().clone();
 
         match &token.kind {
             TokenKind::IntLiteral => {
@@ -220,33 +243,38 @@ impl Parser {
                         column: token.column,
                     }
                 })?;
+                let loc = self.loc_from_token(&token);
                 self.advance();
-                Ok(Expr::IntLit(value))
+                Ok(Expr::IntLit(value, loc))
             }
 
             TokenKind::BoolLiteral => {
                 let value = token.lexeme == "true";
+                let loc = self.loc_from_token(&token);
                 self.advance();
-                Ok(Expr::BoolLit(value))
+                Ok(Expr::BoolLit(value, loc))
             }
 
             TokenKind::StringLiteral => {
                 let value = token.lexeme.clone();
+                let loc = self.loc_from_token(&token);
                 self.advance();
-                Ok(Expr::StringLit(value))
+                Ok(Expr::StringLit(value, loc))
             }
 
             TokenKind::LeftBracket => {
+                let loc = self.loc_from_token(&token);
                 self.advance(); // consume '['
                 let mut exprs = Vec::new();
                 while !self.check(&TokenKind::RightBracket) && !self.is_at_end() {
                     exprs.push(self.parse_expr()?);
                 }
                 self.consume(&TokenKind::RightBracket, "Expected ']'")?;
-                Ok(Expr::Quotation(exprs))
+                Ok(Expr::Quotation(exprs, loc))
             }
 
             TokenKind::Match => {
+                let loc = self.loc_from_token(&token);
                 self.advance(); // consume 'match'
                 let mut branches = Vec::new();
 
@@ -269,13 +297,15 @@ impl Parser {
                 }
 
                 self.consume(&TokenKind::End, "Expected 'end'")?;
-                Ok(Expr::Match { branches })
+                Ok(Expr::Match { branches, loc })
             }
 
             TokenKind::If => {
+                let loc = self.loc_from_token(&token);
                 self.advance(); // consume 'if'
 
                 // Expect two quotations: then-branch and else-branch
+                let then_loc = self.current_loc();
                 self.consume(&TokenKind::LeftBracket, "Expected '[' for then branch")?;
                 let mut then_exprs = Vec::new();
                 while !self.check(&TokenKind::RightBracket) && !self.is_at_end() {
@@ -283,6 +313,7 @@ impl Parser {
                 }
                 self.consume(&TokenKind::RightBracket, "Expected ']'")?;
 
+                let else_loc = self.current_loc();
                 self.consume(&TokenKind::LeftBracket, "Expected '[' for else branch")?;
                 let mut else_exprs = Vec::new();
                 while !self.check(&TokenKind::RightBracket) && !self.is_at_end() {
@@ -291,15 +322,17 @@ impl Parser {
                 self.consume(&TokenKind::RightBracket, "Expected ']'")?;
 
                 Ok(Expr::If {
-                    then_branch: Box::new(Expr::Quotation(then_exprs)),
-                    else_branch: Box::new(Expr::Quotation(else_exprs)),
+                    then_branch: Box::new(Expr::Quotation(then_exprs, then_loc)),
+                    else_branch: Box::new(Expr::Quotation(else_exprs, else_loc)),
+                    loc,
                 })
             }
 
             TokenKind::Ident => {
                 let name = token.lexeme.clone();
+                let loc = self.loc_from_token(&token);
                 self.advance();
-                Ok(Expr::WordCall(name))
+                Ok(Expr::WordCall(name, loc))
             }
 
             _ => Err(ParseError {
@@ -431,7 +464,7 @@ mod tests {
 
         assert_eq!(program.word_defs[0].body.len(), 1);
         match &program.word_defs[0].body[0] {
-            Expr::IntLit(42) => (),
+            Expr::IntLit(42, _) => (),
             _ => panic!("Expected IntLit(42)"),
         }
     }
@@ -444,7 +477,7 @@ mod tests {
 
         assert_eq!(program.word_defs[0].body.len(), 1);
         match &program.word_defs[0].body[0] {
-            Expr::Quotation(exprs) => assert_eq!(exprs.len(), 3),
+            Expr::Quotation(exprs, _) => assert_eq!(exprs.len(), 3),
             _ => panic!("Expected Quotation"),
         }
     }
