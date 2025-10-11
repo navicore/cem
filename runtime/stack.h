@@ -184,6 +184,28 @@ StackCell* push_string(StackCell* stack, const char* value);
 StackCell* push_quotation(StackCell* stack, void* func_ptr);
 
 // ============================================================================
+// String Operations
+// ============================================================================
+
+/**
+ * string_length ( String -- Int )
+ * Get the length of a string (number of bytes)
+ */
+StackCell* string_length(StackCell* stack);
+
+/**
+ * string_concat ( String String -- String )
+ * Concatenate two strings (second + first)
+ */
+StackCell* string_concat(StackCell* stack);
+
+/**
+ * string_equal ( String String -- Bool )
+ * Check if two strings are equal
+ */
+StackCell* string_equal(StackCell* stack);
+
+// ============================================================================
 // Control Flow Operations
 // ============================================================================
 

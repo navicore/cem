@@ -405,6 +405,83 @@ StackCell* push_quotation(StackCell* stack, void* func_ptr) {
 }
 
 // ============================================================================
+// String Operations
+// ============================================================================
+
+StackCell* string_length(StackCell* stack) {
+    if (!stack) {
+        runtime_error("string_length: stack underflow");
+    }
+    if (stack->tag != TAG_STRING) {
+        runtime_error("string_length: expected string on top of stack");
+    }
+
+    // Calculate length
+    int64_t len = (int64_t)strlen(stack->value.s);
+
+    // Pop string and push length
+    StackCell* rest = stack->next;
+    free_cell(stack);
+
+    return push_int(rest, len);
+}
+
+StackCell* string_concat(StackCell* stack) {
+    if (!stack || !stack->next) {
+        runtime_error("string_concat: stack underflow");
+    }
+    if (stack->tag != TAG_STRING || stack->next->tag != TAG_STRING) {
+        runtime_error("string_concat: expected two strings on stack");
+    }
+
+    // Get both strings (top is second operand, next is first operand)
+    char* str2 = stack->value.s;
+    char* str1 = stack->next->value.s;
+
+    // Allocate new string
+    size_t len1 = strlen(str1);
+    size_t len2 = strlen(str2);
+    char* result = malloc(len1 + len2 + 1);
+    if (!result) {
+        runtime_error("string_concat: out of memory");
+    }
+
+    // Concatenate: result = str1 + str2
+    strcpy(result, str1);
+    strcat(result, str2);
+
+    // Pop both strings
+    StackCell* rest = stack->next->next;
+    free_cell(stack->next);
+    free_cell(stack);
+
+    // Push result
+    StackCell* new_cell = push_string(rest, result);
+    free(result);  // push_string makes its own copy
+
+    return new_cell;
+}
+
+StackCell* string_equal(StackCell* stack) {
+    if (!stack || !stack->next) {
+        runtime_error("string_equal: stack underflow");
+    }
+    if (stack->tag != TAG_STRING || stack->next->tag != TAG_STRING) {
+        runtime_error("string_equal: expected two strings on stack");
+    }
+
+    // Compare strings
+    bool result = (strcmp(stack->value.s, stack->next->value.s) == 0);
+
+    // Pop both strings
+    StackCell* rest = stack->next->next;
+    free_cell(stack->next);
+    free_cell(stack);
+
+    return push_bool(rest, result);
+}
+
+// ============================================================================
 // Control Flow Operations (Placeholders)
 // ============================================================================
 
