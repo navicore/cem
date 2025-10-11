@@ -189,6 +189,14 @@ impl CodeGen {
         writeln!(&mut self.output, "declare ptr @call_quotation(ptr)")
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
+        // String operations
+        writeln!(&mut self.output, "declare ptr @string_length(ptr)")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output, "declare ptr @string_concat(ptr)")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output, "declare ptr @string_equal(ptr)")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
         // Utility functions
         writeln!(&mut self.output, "declare void @print_stack(ptr)")
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
