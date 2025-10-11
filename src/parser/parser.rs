@@ -4,6 +4,7 @@ use crate::ast::types::{Effect, Type};
 use crate::ast::{Expr, MatchBranch, Pattern, Program, TypeDef, Variant, WordDef};
 use crate::parser::lexer::{Lexer, Token, TokenKind};
 use std::fmt;
+use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct ParseError {
@@ -26,17 +27,35 @@ pub struct Parser {
     tokens: Vec<Token>,
     current: usize,
     nesting_depth: usize,
+    /// Arc-wrapped filename to avoid duplication across all SourceLocs
+    filename: Arc<str>,
 }
 
 impl Parser {
     pub fn new(input: &str) -> Self {
+        Self::new_with_filename(input, "<input>")
+    }
+
+    pub fn new_with_filename(input: &str, filename: &str) -> Self {
         let mut lexer = Lexer::new(input);
         let tokens = lexer.tokenize();
         Parser {
             tokens,
             current: 0,
             nesting_depth: 0,
+            filename: Arc::from(filename),
         }
+    }
+
+    /// Helper: Create SourceLoc from current token
+    fn current_loc(&self) -> crate::ast::SourceLoc {
+        let token = self.peek();
+        crate::ast::SourceLoc::new(token.line, token.column, Arc::clone(&self.filename))
+    }
+
+    /// Helper: Create SourceLoc from a specific token
+    fn loc_from_token(&self, token: &Token) -> crate::ast::SourceLoc {
+        crate::ast::SourceLoc::new(token.line, token.column, Arc::clone(&self.filename))
     }
 
     pub fn parse(&mut self) -> Result<Program, ParseError> {
@@ -118,6 +137,7 @@ impl Parser {
     }
 
     fn parse_word_def(&mut self) -> Result<WordDef, ParseError> {
+        let colon_token = self.peek().clone();
         self.consume(&TokenKind::Colon, "Expected ':'")?;
 
         let name = self.consume_ident("Expected word name")?;
@@ -135,7 +155,12 @@ impl Parser {
 
         self.consume_ident_value(";", "Expected ';' at end of word definition")?;
 
-        Ok(WordDef { name, effect, body })
+        Ok(WordDef {
+            name,
+            effect,
+            body,
+            loc: self.loc_from_token(&colon_token),
+        })
     }
 
     fn parse_effect(&mut self) -> Result<Effect, ParseError> {
@@ -209,44 +234,48 @@ impl Parser {
     }
 
     fn parse_expr_inner(&mut self) -> Result<Expr, ParseError> {
-        let token = self.peek();
-
-        match &token.kind {
+        match &self.peek().kind {
             TokenKind::IntLiteral => {
-                let value = token.lexeme.parse::<i64>().map_err(|_| {
+                let value = self.peek().lexeme.parse::<i64>().map_err(|_| {
+                    let token = self.peek();
                     ParseError {
                         message: format!("Invalid integer: {}", token.lexeme),
                         line: token.line,
                         column: token.column,
                     }
                 })?;
+                let loc = self.current_loc();
                 self.advance();
-                Ok(Expr::IntLit(value))
+                Ok(Expr::IntLit(value, loc))
             }
 
             TokenKind::BoolLiteral => {
-                let value = token.lexeme == "true";
+                let value = self.peek().lexeme == "true";
+                let loc = self.current_loc();
                 self.advance();
-                Ok(Expr::BoolLit(value))
+                Ok(Expr::BoolLit(value, loc))
             }
 
             TokenKind::StringLiteral => {
-                let value = token.lexeme.clone();
+                let value = self.peek().lexeme.clone();
+                let loc = self.current_loc();
                 self.advance();
-                Ok(Expr::StringLit(value))
+                Ok(Expr::StringLit(value, loc))
             }
 
             TokenKind::LeftBracket => {
+                let loc = self.current_loc();
                 self.advance(); // consume '['
                 let mut exprs = Vec::new();
                 while !self.check(&TokenKind::RightBracket) && !self.is_at_end() {
                     exprs.push(self.parse_expr()?);
                 }
                 self.consume(&TokenKind::RightBracket, "Expected ']'")?;
-                Ok(Expr::Quotation(exprs))
+                Ok(Expr::Quotation(exprs, loc))
             }
 
             TokenKind::Match => {
+                let loc = self.current_loc();
                 self.advance(); // consume 'match'
                 let mut branches = Vec::new();
 
@@ -269,13 +298,15 @@ impl Parser {
                 }
 
                 self.consume(&TokenKind::End, "Expected 'end'")?;
-                Ok(Expr::Match { branches })
+                Ok(Expr::Match { branches, loc })
             }
 
             TokenKind::If => {
+                let loc = self.current_loc();
                 self.advance(); // consume 'if'
 
                 // Expect two quotations: then-branch and else-branch
+                let then_loc = self.current_loc();
                 self.consume(&TokenKind::LeftBracket, "Expected '[' for then branch")?;
                 let mut then_exprs = Vec::new();
                 while !self.check(&TokenKind::RightBracket) && !self.is_at_end() {
@@ -283,6 +314,7 @@ impl Parser {
                 }
                 self.consume(&TokenKind::RightBracket, "Expected ']'")?;
 
+                let else_loc = self.current_loc();
                 self.consume(&TokenKind::LeftBracket, "Expected '[' for else branch")?;
                 let mut else_exprs = Vec::new();
                 while !self.check(&TokenKind::RightBracket) && !self.is_at_end() {
@@ -291,22 +323,27 @@ impl Parser {
                 self.consume(&TokenKind::RightBracket, "Expected ']'")?;
 
                 Ok(Expr::If {
-                    then_branch: Box::new(Expr::Quotation(then_exprs)),
-                    else_branch: Box::new(Expr::Quotation(else_exprs)),
+                    then_branch: Box::new(Expr::Quotation(then_exprs, then_loc)),
+                    else_branch: Box::new(Expr::Quotation(else_exprs, else_loc)),
+                    loc,
                 })
             }
 
             TokenKind::Ident => {
-                let name = token.lexeme.clone();
+                let name = self.peek().lexeme.clone();
+                let loc = self.current_loc();
                 self.advance();
-                Ok(Expr::WordCall(name))
+                Ok(Expr::WordCall(name, loc))
             }
 
-            _ => Err(ParseError {
-                message: format!("Unexpected token: {:?}", token.kind),
-                line: token.line,
-                column: token.column,
-            }),
+            _ => {
+                let token = self.peek();
+                Err(ParseError {
+                    message: format!("Unexpected token: {:?}", token.kind),
+                    line: token.line,
+                    column: token.column,
+                })
+            }
         }
     }
 
@@ -431,7 +468,7 @@ mod tests {
 
         assert_eq!(program.word_defs[0].body.len(), 1);
         match &program.word_defs[0].body[0] {
-            Expr::IntLit(42) => (),
+            Expr::IntLit(42, _) => (),
             _ => panic!("Expected IntLit(42)"),
         }
     }
@@ -444,7 +481,7 @@ mod tests {
 
         assert_eq!(program.word_defs[0].body.len(), 1);
         match &program.word_defs[0].body[0] {
-            Expr::Quotation(exprs) => assert_eq!(exprs.len(), 3),
+            Expr::Quotation(exprs, _) => assert_eq!(exprs.len(), 3),
             _ => panic!("Expected Quotation"),
         }
     }
@@ -469,5 +506,101 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.message.contains("nesting depth"));
+    }
+
+    #[test]
+    fn test_source_location_tracking() {
+        // Test that line/column numbers are captured correctly
+        let input = ": test ( -- Int )\n  42 ;";
+        let mut parser = Parser::new_with_filename(input, "test.cem");
+        let program = parser.parse().unwrap();
+
+        // Check word definition location (line 1, column 1 for ':')
+        let word_loc = &program.word_defs[0].loc;
+        assert_eq!(word_loc.line, 1);
+        assert_eq!(word_loc.column, 1);
+        assert_eq!(word_loc.file.as_ref(), "test.cem");
+
+        // Check integer literal location (line 2, column 2 for '42')
+        // The lexer uses 0-based columns internally but reports 1-based
+        match &program.word_defs[0].body[0] {
+            Expr::IntLit(42, loc) => {
+                assert_eq!(loc.line, 2);
+                assert_eq!(loc.column, 2); // Column for '4' in '42' after two spaces
+                assert_eq!(loc.file.as_ref(), "test.cem");
+            }
+            _ => panic!("Expected IntLit"),
+        }
+    }
+
+    #[test]
+    fn test_source_location_shared_filename() {
+        // Test that all locations share the same Arc<str> for filename
+        let input = ": foo ( -- Int ) 1 2 + ;";
+        let mut parser = Parser::new_with_filename(input, "shared.cem");
+        let program = parser.parse().unwrap();
+
+        let word_loc = &program.word_defs[0].loc;
+
+        // Extract locations from expressions
+        let mut locs = vec![word_loc];
+        for expr in &program.word_defs[0].body {
+            locs.push(expr.loc());
+        }
+
+        // Verify all locations point to the same Arc<str> instance
+        // (Arc::ptr_eq checks if they point to the same allocation)
+        for i in 1..locs.len() {
+            assert!(Arc::ptr_eq(&locs[0].file, &locs[i].file),
+                "SourceLoc filenames should share the same Arc allocation");
+        }
+    }
+
+    #[test]
+    fn test_loc_accessor() {
+        // Test the loc() accessor method on Expr
+        let input = ": test ( -- ) 42 true \"hello\" word [ 1 ] ;";
+        let mut parser = Parser::new_with_filename(input, "test.cem");
+        let program = parser.parse().unwrap();
+
+        // Verify loc() works for all expression types
+        for expr in &program.word_defs[0].body {
+            let loc = expr.loc();
+            assert_eq!(loc.file.as_ref(), "test.cem");
+            assert!(loc.line > 0);
+            assert!(loc.column > 0);
+        }
+    }
+
+    #[test]
+    fn test_multiline_location_tracking() {
+        // Test location tracking across multiple lines
+        let input = ":\ntest\n(\n--\nInt\n)\n42\n;";
+        let mut parser = Parser::new(input);
+        let program = parser.parse().unwrap();
+
+        // The integer 42 should be on line 7
+        match &program.word_defs[0].body[0] {
+            Expr::IntLit(42, loc) => {
+                assert_eq!(loc.line, 7, "Integer literal should be on line 7");
+            }
+            _ => panic!("Expected IntLit"),
+        }
+    }
+
+    #[test]
+    fn test_source_loc_unknown() {
+        // Test SourceLoc::unknown() utility
+        let loc = crate::ast::SourceLoc::unknown();
+        assert_eq!(loc.line, 0);
+        assert_eq!(loc.column, 0);
+        assert_eq!(loc.file.as_ref(), "<unknown>");
+    }
+
+    #[test]
+    fn test_source_loc_display() {
+        // Test SourceLoc Display impl
+        let loc = crate::ast::SourceLoc::new(10, 5, "test.cem");
+        assert_eq!(format!("{}", loc), "test.cem:10:5");
     }
 }

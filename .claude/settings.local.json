@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(gh pr view:*)"
+      "Bash(gh pr view:*)",
+      "Bash(cargo check:*)",
+      "Bash(cargo test:*)"
     ],
     "deny": [],
     "ask": []

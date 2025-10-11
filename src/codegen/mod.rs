@@ -35,7 +35,7 @@ pub use error::{CodegenError, CodegenResult};
 pub use ir::IRGenerator;
 pub use linker::{compile_to_object, link_program};
 
-use crate::ast::{Expr, Program, WordDef};
+use crate::ast::{Expr, Program, WordDef, SourceLoc};
 use std::fmt::Write as _;
 use std::process::Command;
 
@@ -284,7 +284,7 @@ impl CodeGen {
     /// is a WordCall in tail position (which will be compiled as a musttail call)
     fn compile_branch_quotation(&mut self, quot: &Expr, initial_stack: &str) -> CodegenResult<(String, bool)> {
         match quot {
-            Expr::Quotation(exprs) => {
+            Expr::Quotation(exprs, _loc) => {
                 let mut stack_var = initial_stack.to_string();
                 let len = exprs.len();
 
@@ -302,7 +302,7 @@ impl CodeGen {
                     // Check if the last expression is a WordCall in tail position
                     // (which compile_expr_with_context will compile as a musttail call)
                     if is_tail {
-                        if let Expr::WordCall(_) = expr {
+                        if let Expr::WordCall(_, _) = expr {
                             ends_with_musttail = true;
                         }
                     }
@@ -319,7 +319,7 @@ impl CodeGen {
     fn compile_expr_with_context(&mut self, expr: &Expr, stack: &str, in_tail_position: bool) -> CodegenResult<String> {
         match expr {
             // Tail-call optimization: if in tail position and calling a word, use musttail
-            Expr::WordCall(name) if in_tail_position => {
+            Expr::WordCall(name, _loc) if in_tail_position => {
                 let result = self.fresh_temp();
                 writeln!(
                     &mut self.output,
@@ -337,7 +337,7 @@ impl CodeGen {
     /// Compile a single expression, returning the new stack variable name
     fn compile_expr(&mut self, expr: &Expr, stack: &str) -> CodegenResult<String> {
         match expr {
-            Expr::IntLit(n) => {
+            Expr::IntLit(n, _loc) => {
                 let result = self.fresh_temp();
                 writeln!(
                     &mut self.output,
@@ -348,7 +348,7 @@ impl CodeGen {
                 Ok(result)
             }
 
-            Expr::BoolLit(b) => {
+            Expr::BoolLit(b, _loc) => {
                 let result = self.fresh_temp();
                 let value = if *b { 1 } else { 0 };
                 writeln!(
@@ -360,7 +360,7 @@ impl CodeGen {
                 Ok(result)
             }
 
-            Expr::StringLit(s) => {
+            Expr::StringLit(s, _loc) => {
                 // Create global string constant
                 let str_global = format!("@.str.{}", self.temp_counter);
                 let escaped = Self::escape_llvm_string(s);
@@ -395,7 +395,7 @@ impl CodeGen {
                 Ok(result)
             }
 
-            Expr::WordCall(name) => {
+            Expr::WordCall(name, _loc) => {
                 let result = self.fresh_temp();
                 writeln!(
                     &mut self.output,
@@ -406,7 +406,7 @@ impl CodeGen {
                 Ok(result)
             }
 
-            Expr::Quotation(exprs) => {
+            Expr::Quotation(exprs, _loc) => {
                 // Generate an anonymous function for the quotation
                 let quot_name = format!("quot_{}", self.temp_counter);
                 let saved_counter = self.temp_counter;
@@ -431,7 +431,7 @@ impl CodeGen {
 
                     // If last expression is a musttail call, return its result
                     if is_tail {
-                        if let Expr::WordCall(_) = expr {
+                        if let Expr::WordCall(_, _) = expr {
                             writeln!(&mut self.output, "  ret ptr %{}", stack_var)
                                 .map_err(|e| CodegenError::InternalError(e.to_string()))?;
                         }
@@ -439,7 +439,7 @@ impl CodeGen {
                 }
 
                 // If we didn't return via musttail, return normally
-                if len == 0 || !matches!(exprs.last(), Some(Expr::WordCall(_))) {
+                if len == 0 || !matches!(exprs.last(), Some(Expr::WordCall(_, _))) {
                     writeln!(&mut self.output, "  ret ptr %{}", stack_var)
                         .map_err(|e| CodegenError::InternalError(e.to_string()))?;
                 }
@@ -471,7 +471,7 @@ impl CodeGen {
                 feature: "pattern matching".to_string(),
             }),
 
-            Expr::If { then_branch, else_branch } => {
+            Expr::If { then_branch, else_branch, loc: _ } => {
                 // Stack top must be a Bool
                 // Strategy: extract bool, branch to then/else, both produce same stack effect
 
@@ -616,7 +616,8 @@ mod tests {
                 inputs: StackType::Empty,
                 outputs: StackType::Empty.push(Type::Int),
             },
-            body: vec![Expr::IntLit(5)],
+            body: vec![Expr::IntLit(5, SourceLoc::unknown())],
+            loc: SourceLoc::unknown(),
         };
 
         let program = Program {
@@ -644,9 +645,10 @@ mod tests {
                 outputs: StackType::Empty.push(Type::Int),
             },
             body: vec![
-                Expr::WordCall("dup".to_string()),
-                Expr::WordCall("add".to_string()),
+                Expr::WordCall("dup".to_string(), SourceLoc::unknown()),
+                Expr::WordCall("add".to_string(), SourceLoc::unknown()),
             ],
+            loc: SourceLoc::unknown(),
         };
 
         let program = Program {
@@ -672,6 +674,7 @@ mod tests {
                 outputs: StackType::Empty,
             },
             body: vec![],
+            loc: SourceLoc::unknown(),
         };
 
         let program = Program {
@@ -700,12 +703,13 @@ mod tests {
             },
             body: vec![
                 Expr::Quotation(vec![
-                    Expr::IntLit(5),
-                    Expr::IntLit(10),
-                    Expr::WordCall("add".to_string()),
-                ]),
-                Expr::WordCall("call_quotation".to_string()),
+                    Expr::IntLit(5, SourceLoc::unknown()),
+                    Expr::IntLit(10, SourceLoc::unknown()),
+                    Expr::WordCall("add".to_string(), SourceLoc::unknown()),
+                ], SourceLoc::unknown()),
+                Expr::WordCall("call_quotation".to_string(), SourceLoc::unknown()),
             ],
+            loc: SourceLoc::unknown(),
         };
 
         let program = Program {
