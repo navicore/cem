@@ -566,3 +566,64 @@ fn test_nested_if_expressions() {
     std::fs::remove_file("test_nested_if_exe").ok();
     std::fs::remove_file("test_nested_if_exe.ll").ok();
 }
+
+#[test]
+fn test_scheduler_linkage() {
+    // Build runtime
+    let runtime_status = Command::new("just")
+        .arg("build-runtime")
+        .status()
+        .expect("Failed to build runtime");
+
+    assert!(runtime_status.success());
+
+    // : test_scheduler ( -- Int )
+    //   5 test_yield 10 add ;
+    // Tests that test_yield links correctly and doesn't break execution
+    // (Phase 1: test_yield is a no-op, scheduler is not functional yet)
+    let word = WordDef {
+        name: "test_scheduler".to_string(),
+        effect: Effect {
+            inputs: StackType::Empty,
+            outputs: StackType::Empty.push(Type::Int),
+        },
+        body: vec![
+            Expr::IntLit(5),
+            Expr::WordCall("test_yield".to_string()),
+            Expr::IntLit(10),
+            Expr::WordCall("add".to_string()),
+        ],
+    };
+
+    let program = Program {
+        type_defs: vec![],
+        word_defs: vec![word],
+    };
+
+    // Generate IR
+    let mut codegen = CodeGen::new();
+    let ir = codegen.compile_program_with_main(&program, Some("test_scheduler"))
+        .expect("Failed to generate IR");
+
+    // Verify test_yield is declared and called
+    assert!(ir.contains("declare ptr @test_yield(ptr)"));
+    assert!(ir.contains("call ptr @test_yield"));
+
+    // Link and run
+    link_program(&ir, "runtime/libcem_runtime.a", "test_scheduler_exe")
+        .expect("Failed to link");
+
+    let output = Command::new("./test_scheduler_exe")
+        .output()
+        .expect("Failed to run executable");
+
+    assert!(output.status.success());
+
+    // Should output 15 (5 + 10)
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("15"), "Expected 15 from 5 + 10, got: {}", stdout);
+
+    // Clean up
+    std::fs::remove_file("test_scheduler_exe").ok();
+    std::fs::remove_file("test_scheduler_exe.ll").ok();
+}

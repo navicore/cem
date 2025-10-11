@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdint.h>
 
 // Compile-time assertions to verify ABI assumptions
 // The LLVM codegen assumes bool is 1 byte (i8) - verify this at compile time
@@ -54,6 +55,19 @@ void free_stack(StackCell* stack) {
 // call stack. However, for a stack machine runtime, errors are typically
 // unrecoverable (stack corruption, type errors, etc.), so exit(1) is
 // acceptable for this phase of development.
+//
+// MEMORY LEAK BEHAVIOR: This function is marked __attribute__((noreturn))
+// and immediately exits the process. Any memory allocated before the error
+// (including partially constructed StackCells) will leak. This is acceptable
+// because:
+// 1. The process terminates immediately (OS reclaims all memory)
+// 2. Runtime errors indicate unrecoverable conditions (type errors, stack
+//    corruption, etc.)
+// 3. Attempting cleanup during error handling could cause further corruption
+//
+// Example: string_concat allocates a temp buffer, then calls push_string.
+// If push_string fails with runtime_error(), the temp buffer leaks. This is
+// safe because exit(1) terminates the process immediately.
 void runtime_error(const char* message) {
     fprintf(stderr, "Runtime error: %s\n", message);
     exit(1);
@@ -415,8 +429,11 @@ StackCell* string_length(StackCell* stack) {
     if (stack->tag != TAG_STRING) {
         runtime_error("string_length: expected string on top of stack");
     }
+    if (!stack->value.s) {
+        runtime_error("string_length: NULL string pointer");
+    }
 
-    // Calculate length
+    // Calculate length (returns byte count, not UTF-8 character count)
     int64_t len = (int64_t)strlen(stack->value.s);
 
     // Pop string and push length
@@ -438,26 +455,42 @@ StackCell* string_concat(StackCell* stack) {
     char* str2 = stack->value.s;
     char* str1 = stack->next->value.s;
 
-    // Allocate new string
+    // NULL pointer checks
+    if (!str1 || !str2) {
+        runtime_error("string_concat: NULL string pointer");
+    }
+
+    // Calculate lengths and check for overflow
     size_t len1 = strlen(str1);
     size_t len2 = strlen(str2);
-    char* result = malloc(len1 + len2 + 1);
+
+    // Check for size_t overflow: len1 + len2 + 1
+    if (len1 > SIZE_MAX - len2 - 1) {
+        runtime_error("string_concat: string too long (overflow)");
+    }
+    size_t total_len = len1 + len2 + 1;
+
+    // Allocate new string
+    char* result = malloc(total_len);
     if (!result) {
         runtime_error("string_concat: out of memory");
     }
 
-    // Concatenate: result = str1 + str2
-    strcpy(result, str1);
-    strcat(result, str2);
+    // Concatenate using memcpy (safer than strcpy/strcat)
+    memcpy(result, str1, len1);
+    memcpy(result + len1, str2, len2);
+    result[len1 + len2] = '\0';
 
-    // Pop both strings
+    // Pop both strings BEFORE push_string (in case push_string fails)
     StackCell* rest = stack->next->next;
     free_cell(stack->next);
     free_cell(stack);
 
-    // Push result
+    // Push result (this makes its own copy)
     StackCell* new_cell = push_string(rest, result);
-    free(result);  // push_string makes its own copy
+
+    // Free our temporary buffer
+    free(result);
 
     return new_cell;
 }
@@ -468,6 +501,11 @@ StackCell* string_equal(StackCell* stack) {
     }
     if (stack->tag != TAG_STRING || stack->next->tag != TAG_STRING) {
         runtime_error("string_equal: expected two strings on stack");
+    }
+
+    // NULL pointer checks
+    if (!stack->value.s || !stack->next->value.s) {
+        runtime_error("string_equal: NULL string pointer");
     }
 
     // Compare strings

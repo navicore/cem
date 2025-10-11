@@ -197,6 +197,10 @@ impl CodeGen {
         writeln!(&mut self.output, "declare ptr @string_equal(ptr)")
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
+        // Scheduler operations (testing)
+        writeln!(&mut self.output, "declare ptr @test_yield(ptr)")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
         // Utility functions
         writeln!(&mut self.output, "declare void @print_stack(ptr)")
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;

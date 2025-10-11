@@ -36,6 +36,7 @@ can be both safe and practical.
 
 - **Compile-time safety**: Type system catches errors before runtime
 - **Zero-cost abstractions**: LLVM native compilation, no GC
+- **Static linking**: Self-contained binaries with no runtime dependencies
 - **No C stack issues**: Explicit data stack with compile-time bounds
 - **Safe concurrency**: Linear channels prevent data races
 - **Pattern matching**: Destructuring as stack operations
@@ -101,6 +102,10 @@ See [EXAMPLES.md](EXAMPLES.md) for more code examples.
 ## Building
 
 *(To be added once implementation begins)*
+
+## Debugging
+
+Cem binaries work with standard debuggers (LLDB/GDB) out of the box. You can step through runtime code, set breakpoints, and inspect memory. For Cem-specific debugging features (stack visualization, quotation inspection), see [docs/DEBUGGING.md](docs/DEBUGGING.md).
 
 ## Project Structure
 

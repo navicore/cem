@@ -1,0 +1,6 @@
+: test_scheduler ( -- Int )
+    5           # Push 5 onto stack
+    test_yield  # Yield (currently a no-op in Phase 1)
+    10          # Push 10 onto stack
+    add         # Add them: 5 + 10 = 15
+;

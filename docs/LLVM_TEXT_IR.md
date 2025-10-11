@@ -178,6 +178,68 @@ declare ptr @multiply(ptr)
 clang program.ll runtime/libcem_runtime.a -o program
 ```
 
+## Static Linking: Self-Contained Binaries
+
+Cem produces **statically linked executables** with zero runtime dependencies (beyond system libraries). This follows the modern approach used by Rust and Go.
+
+### How It Works
+
+When linking, we pass the runtime as a static archive (`.a` file):
+
+```bash
+clang program.ll runtime/libcem_runtime.a -o program
+```
+
+**Key points**:
+- `libcem_runtime.a` is a static archive containing compiled C code
+- Clang statically links `.a` files by default when passed directly
+- The entire Cem runtime is embedded into the final binary
+- No `libcem_runtime.so` or external dependencies needed at runtime
+
+### Binary Dependencies
+
+**What's included (statically linked)**:
+- ✅ All Cem runtime code (stack operations, scheduler, I/O)
+- ✅ Your compiled program code
+
+**System dependencies only**:
+- macOS: `libSystem.dylib` (unavoidable - macOS C standard library)
+- Linux: `libc.so.6` (can be eliminated with `-static` if needed)
+
+### Benefits
+
+1. **Deploy anywhere**: Just copy the binary, no installation required
+2. **No version conflicts**: Runtime is locked to the binary
+3. **Predictable behavior**: Same runtime code on every system
+4. **Security**: No runtime library substitution attacks
+5. **Simplicity**: Single file to distribute
+
+### Verification
+
+You can verify static linking by inspecting a compiled binary:
+
+```bash
+# macOS
+otool -L program
+# Output should only show system libraries (libSystem)
+
+# Linux
+ldd program
+# Output should only show libc and ld-linux (no libcem_runtime)
+
+# Check binary is self-contained
+nm program | grep cem_  # Shows runtime symbols are embedded
+```
+
+### Comparison with Other Languages
+
+**Rust**: Typically statically links the standard library and most crates (dynamic linking available via dylib)
+**Go**: Produces statically linked binaries by default
+**C/C++**: Commonly uses dynamic linking (though static linking is supported)
+**Cem**: Static linking by default - prioritizes portability and ease of deployment
+
+This approach follows modern best practices for systems languages, ensuring Cem binaries are self-contained and easy to distribute.
+
 ## Trade-offs Accepted
 
 ### What We Lose

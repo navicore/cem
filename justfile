@@ -110,7 +110,8 @@ ci: fmt lint test
 build-runtime:
     @echo "Building C runtime library..."
     cd runtime && clang -Wall -Wextra -std=c11 -g -O2 -c stack.c -o stack.o
-    cd runtime && ar rcs libcem_runtime.a stack.o
+    cd runtime && clang -Wall -Wextra -std=c11 -g -O2 -c scheduler.c -o scheduler.o
+    cd runtime && ar rcs libcem_runtime.a stack.o scheduler.o
     @echo "✅ Built runtime/libcem_runtime.a"
 
 # Build runtime test program
@@ -119,6 +120,13 @@ test-runtime: build-runtime
     cd runtime && clang -Wall -Wextra -std=c11 -g test_runtime.c -L. -lcem_runtime -o test_runtime
     cd runtime && ./test_runtime
     @echo "✅ Runtime tests passed"
+
+# Test scheduler infrastructure
+test-scheduler: build-runtime
+    @echo "Building scheduler tests..."
+    cd runtime && clang -Wall -Wextra -std=c11 -g test_scheduler.c -L. -lcem_runtime -o test_scheduler
+    cd runtime && ./test_scheduler
+    @echo "✅ Scheduler tests passed"
 
 # Clean runtime build artifacts
 clean-runtime:
