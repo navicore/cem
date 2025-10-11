@@ -68,6 +68,7 @@ pub fn link_program(ir_code: &str, runtime_lib: &str, output: &str) -> CodegenRe
         .arg("-o")
         .arg(output)
         .arg("-O2") // Enable optimizations for musttail
+        .arg("-Wno-override-module") // Suppress target triple override warning
         .status()
         .map_err(|e| CodegenError::LinkerError {
             message: format!("Failed to execute clang: {}", e),
@@ -111,6 +112,7 @@ pub fn compile_to_object(ir_code: &str, output: &str) -> CodegenResult<()> {
         .arg("-o")
         .arg(format!("{}.o", output))
         .arg("-O2") // Enable optimizations
+        .arg("-Wno-override-module") // Suppress target triple override warning
         .status()
         .map_err(|e| CodegenError::LinkerError {
             message: format!("Failed to execute clang: {}", e),

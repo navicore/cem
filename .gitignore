@@ -12,3 +12,4 @@ test_*
 !test_*.rs
 *.ll
 *.o
+a.out
