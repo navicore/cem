@@ -647,3 +647,66 @@ fn test_scheduler_linkage() {
     std::fs::remove_file("test_scheduler_exe").ok();
     std::fs::remove_file("test_scheduler_exe.ll").ok();
 }
+
+#[test]
+fn test_debug_metadata_emission() {
+    // Test that debug metadata is properly emitted in LLVM IR
+    let word = WordDef {
+        name: "fortytwo".to_string(),
+        effect: Effect {
+            inputs: StackType::Empty,
+            outputs: StackType::Empty.push(Type::Int),
+        },
+        body: vec![Expr::IntLit(42, SourceLoc::new(1, 25, "test.cem".to_string()))],
+        loc: SourceLoc::new(1, 1, "test.cem".to_string()),
+    };
+
+    let program = Program {
+        type_defs: vec![],
+        word_defs: vec![word],
+    };
+
+    let mut codegen = CodeGen::new();
+    let ir = codegen.compile_program(&program).expect("Failed to generate IR");
+
+    // Verify debug metadata is present
+    assert!(ir.contains("!DIFile"), "Should contain DIFile metadata");
+    assert!(ir.contains("!DICompileUnit"), "Should contain DICompileUnit metadata");
+    assert!(ir.contains("!DISubprogram"), "Should contain DISubprogram metadata");
+    assert!(ir.contains("!DILocation"), "Should contain DILocation metadata");
+    assert!(ir.contains("!llvm.dbg.cu"), "Should contain llvm.dbg.cu");
+    assert!(ir.contains("!llvm.module.flags"), "Should contain module flags");
+
+    // Verify instruction has debug annotation
+    assert!(ir.contains(", !dbg !"), "Instructions should have !dbg annotations");
+
+    // Verify the function references its subprogram
+    assert!(ir.contains("define ptr @fortytwo(ptr %stack) !dbg !"),
+            "Function should reference DISubprogram");
+}
+
+#[test]
+fn test_debug_metadata_filename_escaping() {
+    // Test that filenames with special characters are properly escaped
+    let word = WordDef {
+        name: "test".to_string(),
+        effect: Effect {
+            inputs: StackType::Empty,
+            outputs: StackType::Empty.push(Type::Int),
+        },
+        body: vec![Expr::IntLit(42, SourceLoc::new(1, 1, "test\"file.cem".to_string()))],
+        loc: SourceLoc::new(1, 1, "test\"file.cem".to_string()),
+    };
+
+    let program = Program {
+        type_defs: vec![],
+        word_defs: vec![word],
+    };
+
+    let mut codegen = CodeGen::new();
+    let ir = codegen.compile_program(&program).expect("Failed to generate IR");
+
+    // Verify the filename is properly escaped (quote becomes \")
+    assert!(ir.contains(r#"!DIFile(filename: "test\"file.cem""#),
+            "Filename with quotes should be escaped");
+}
