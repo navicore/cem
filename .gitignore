@@ -8,7 +8,7 @@ runtime/test_runtime
 runtime/*.dSYM/
 
 # Test artifacts
-test_*.ll
-test_*.o
+test_*
+!test_*.rs
 *.ll
 *.o

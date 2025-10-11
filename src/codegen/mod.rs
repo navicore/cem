@@ -43,6 +43,7 @@ use std::process::Command;
 pub struct CodeGen {
     output: String,
     temp_counter: usize,
+    current_block: String,  // Track the current basic block label we're emitting into
 }
 
 impl CodeGen {
@@ -51,6 +52,7 @@ impl CodeGen {
         CodeGen {
             output: String::new(),
             temp_counter: 0,
+            current_block: "entry".to_string(),
         }
     }
 
@@ -236,6 +238,7 @@ impl CodeGen {
     /// Compile a word definition to LLVM function
     fn compile_word(&mut self, word: &WordDef) -> CodegenResult<()> {
         self.temp_counter = 0; // Reset for each function
+        self.current_block = "entry".to_string(); // Reset to entry block
 
         writeln!(&mut self.output, "define ptr @{}(ptr %stack) {{", word.name)
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
@@ -263,18 +266,37 @@ impl CodeGen {
         Ok(())
     }
 
-    /// Compile a quotation in a branch (then/else)
-    /// Returns the final stack variable name
-    fn compile_branch_quotation(&mut self, quot: &Expr, initial_stack: &str) -> CodegenResult<String> {
+    /// Compile a branch quotation (quotation inside then/else)
+    /// Returns (result_var, ends_with_musttail)
+    ///
+    /// ends_with_musttail is true if the last expression in the quotation
+    /// is a WordCall in tail position (which will be compiled as a musttail call)
+    fn compile_branch_quotation(&mut self, quot: &Expr, initial_stack: &str) -> CodegenResult<(String, bool)> {
         match quot {
             Expr::Quotation(exprs) => {
                 let mut stack_var = initial_stack.to_string();
                 let len = exprs.len();
+
+                // Empty quotations don't end with musttail
+                if len == 0 {
+                    return Ok((stack_var, false));
+                }
+
+                let mut ends_with_musttail = false;
+
                 for (i, expr) in exprs.iter().enumerate() {
                     let is_tail = i == len - 1;  // Track tail position in branch
                     stack_var = self.compile_expr_with_context(expr, &stack_var, is_tail)?;
+
+                    // Check if the last expression is a WordCall in tail position
+                    // (which compile_expr_with_context will compile as a musttail call)
+                    if is_tail {
+                        if let Expr::WordCall(_) = expr {
+                            ends_with_musttail = true;
+                        }
+                    }
                 }
-                Ok(stack_var)
+                Ok((stack_var, ends_with_musttail))
             }
             _ => Err(CodegenError::InternalError(
                 "If branches must be quotations".to_string()
@@ -398,57 +420,101 @@ impl CodeGen {
                 //   - value union at offset 8 (16 bytes total - largest member is variant struct)
                 //   - next: ptr at offset 24 (8 bytes)
                 // LLVM struct: { i32, [4 x i8], [16 x i8], ptr } = 32 bytes
-                let bool_ptr = self.fresh_temp();
-                let bool_val = self.fresh_temp();
-                let rest_ptr = self.fresh_temp();
 
                 // Get bool value from union at offset 8 (field index 2)
                 // Bool is stored as i8 in the first byte of the 16-byte union
+                let bool_ptr = self.fresh_temp();
                 writeln!(&mut self.output, "  %{} = getelementptr inbounds {{ i32, [4 x i8], [16 x i8], ptr }}, ptr %{}, i32 0, i32 2, i32 0", bool_ptr, stack)
                     .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                let bool_val = self.fresh_temp();
                 writeln!(&mut self.output, "  %{} = load i8, ptr %{}", bool_val, bool_ptr)
                     .map_err(|e| CodegenError::InternalError(e.to_string()))?;
-                // TODO: Using hardcoded %cond causes collisions in nested ifs.
-                // See docs/KNOWN_ISSUES.md - "Nested If Expression Variable Collision"
-                // Attempted fix with fresh_temp() causes LLVM IR numbering errors.
-                writeln!(&mut self.output, "  %cond = trunc i8 %{} to i1", bool_val)
+
+                // Use fresh temp for cond to avoid collisions in nested ifs
+                let cond_var = self.fresh_temp();
+                writeln!(&mut self.output, "  %{} = trunc i8 %{} to i1", cond_var, bool_val)
                     .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
                 // Get rest of stack (next pointer at field index 3)
+                let rest_ptr = self.fresh_temp();
                 writeln!(&mut self.output, "  %{} = getelementptr inbounds {{ i32, [4 x i8], [16 x i8], ptr }}, ptr %{}, i32 0, i32 3", rest_ptr, stack)
                     .map_err(|e| CodegenError::InternalError(e.to_string()))?;
-                // TODO: Using hardcoded %rest causes collisions in nested ifs.
-                // See docs/KNOWN_ISSUES.md - "Nested If Expression Variable Collision"
-                writeln!(&mut self.output, "  %rest = load ptr, ptr %{}", rest_ptr)
+
+                // Use fresh temp for rest to avoid collisions in nested ifs
+                let rest_var = self.fresh_temp();
+                writeln!(&mut self.output, "  %{} = load ptr, ptr %{}", rest_var, rest_ptr)
                     .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
-                // Branch
-                writeln!(&mut self.output, "  br i1 %cond, label %{}, label %{}", then_label, else_label)
+                // Branch using the condition variable
+                writeln!(&mut self.output, "  br i1 %{}, label %{}, label %{}", cond_var, then_label, else_label)
                     .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
                 // Then branch
                 writeln!(&mut self.output, "{}:", then_label)
                     .map_err(|e| CodegenError::InternalError(e.to_string()))?;
-                let then_stack = self.compile_branch_quotation(then_branch, "rest")?;
-                writeln!(&mut self.output, "  br label %{}", merge_label)
-                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                self.current_block = then_label.clone();
+                let (then_stack, then_is_musttail) = self.compile_branch_quotation(then_branch, &rest_var)?;
+
+                // Capture the actual block that will branch to merge (after any nested ifs)
+                let then_predecessor = self.current_block.clone();
+
+                // If then branch ends with musttail, emit return instead of branch
+                if then_is_musttail {
+                    writeln!(&mut self.output, "  ret ptr %{}", then_stack)
+                        .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                } else {
+                    writeln!(&mut self.output, "  br label %{}", merge_label)
+                        .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                }
 
                 // Else branch
                 writeln!(&mut self.output, "{}:", else_label)
                     .map_err(|e| CodegenError::InternalError(e.to_string()))?;
-                let else_stack = self.compile_branch_quotation(else_branch, "rest")?;
-                writeln!(&mut self.output, "  br label %{}", merge_label)
-                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                self.current_block = else_label.clone();
+                let (else_stack, else_is_musttail) = self.compile_branch_quotation(else_branch, &rest_var)?;
 
-                // Merge point
-                writeln!(&mut self.output, "{}:", merge_label)
-                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
-                let result = self.fresh_temp();
-                writeln!(&mut self.output, "  %{} = phi ptr [ %{}, %{} ], [ %{}, %{} ]",
-                    result, then_stack, then_label, else_stack, else_label)
-                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                // Capture the actual block that will branch to merge (after any nested ifs)
+                let else_predecessor = self.current_block.clone();
 
-                Ok(result)
+                // If else branch ends with musttail, emit return instead of branch
+                if else_is_musttail {
+                    writeln!(&mut self.output, "  ret ptr %{}", else_stack)
+                        .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                } else {
+                    writeln!(&mut self.output, "  br label %{}", merge_label)
+                        .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                }
+
+                // Merge point - only if at least one branch doesn't end with musttail
+                if !then_is_musttail || !else_is_musttail {
+                    writeln!(&mut self.output, "{}:", merge_label)
+                        .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                    self.current_block = merge_label.clone();
+
+                    // Build phi node based on which branches contribute
+                    let result = self.fresh_temp();
+                    if !then_is_musttail && !else_is_musttail {
+                        // Both branches merge - use actual predecessors
+                        writeln!(&mut self.output, "  %{} = phi ptr [ %{}, %{} ], [ %{}, %{} ]",
+                            result, then_stack, then_predecessor, else_stack, else_predecessor)
+                            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                    } else if !then_is_musttail {
+                        // Only then branch merges (else returned)
+                        writeln!(&mut self.output, "  %{} = phi ptr [ %{}, %{} ]",
+                            result, then_stack, then_predecessor)
+                            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                    } else {
+                        // Only else branch merges (then returned)
+                        writeln!(&mut self.output, "  %{} = phi ptr [ %{}, %{} ]",
+                            result, else_stack, else_predecessor)
+                            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                    }
+                    Ok(result)
+                } else {
+                    // Both branches end with musttail and return - no merge point needed
+                    // This is actually unreachable code after the if, so return a dummy value
+                    Ok(then_stack) // Won't be used since both branches returned
+                }
             }
 
         }

@@ -474,10 +474,7 @@ fn test_tail_call_in_if_branch() {
     std::fs::remove_file("test_tail_in_if_exe.ll").ok();
 }
 
-// TODO: Debug temp variable numbering issue - investigation needed
-// The fix suggested (using fresh_temp for cond/rest) causes numbering gaps
 #[test]
-#[ignore]
 fn test_nested_if_expressions() {
     // Build runtime
     let runtime_status = Command::new("just")
@@ -549,6 +546,9 @@ fn test_nested_if_expressions() {
     assert!(ir.contains("then_"), "Expected then branch labels");
     assert!(ir.contains("else_"), "Expected else branch labels");
     assert!(ir.contains("merge_"), "Expected merge block labels");
+
+    // Save IR for debugging
+    std::fs::write("test_nested_if_debug.ll", &ir).expect("Failed to write IR");
 
     link_program(&ir, "runtime/libcem_runtime.a", "test_nested_if_exe")
         .expect("Failed to link");

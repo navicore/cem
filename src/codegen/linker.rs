@@ -67,7 +67,7 @@ pub fn link_program(ir_code: &str, runtime_lib: &str, output: &str) -> CodegenRe
         .arg(runtime_lib)
         .arg("-o")
         .arg(output)
-        .arg("-O2") // Enable optimizations
+        .arg("-O2") // Enable optimizations for musttail
         .status()
         .map_err(|e| CodegenError::LinkerError {
             message: format!("Failed to execute clang: {}", e),
