@@ -67,7 +67,9 @@ type Option<T> =
 
 ## Flow Control: Recursion Over Loops
 
-Cem uses **recursion with tail-call optimization** as its primary flow control mechanism, not imperative loops. This keeps the language pure and minimal while providing full expressive power.
+Cem uses **recursion with tail-call optimization** as its primary flow control
+mechanism, not imperative loops. This keeps the language pure and minimal while
+providing full expressive power.
 
 ```cem
 # Tail-recursive factorial with accumulator
@@ -81,7 +83,8 @@ Cem uses **recursion with tail-call optimization** as its primary flow control m
   1 factorial-helper ;
 ```
 
-The compiler automatically optimizes tail calls into jumps, making recursion as efficient as any loop. See [docs/recursion.md](docs/recursion.md) for details.
+The compiler automatically optimizes tail calls into jumps, making recursion as
+efficient as any loop. See [docs/recursion.md](docs/recursion.md) for details.
 
 ## Status
 

@@ -242,8 +242,10 @@ impl CodeGen {
         match quot {
             Expr::Quotation(exprs) => {
                 let mut stack_var = initial_stack.to_string();
-                for expr in exprs {
-                    stack_var = self.compile_expr(expr, &stack_var)?;
+                let len = exprs.len();
+                for (i, expr) in exprs.iter().enumerate() {
+                    let is_tail = i == len - 1;  // Track tail position in branch
+                    stack_var = self.compile_expr_with_context(expr, &stack_var, is_tail)?;
                 }
                 Ok(stack_var)
             }
@@ -363,26 +365,27 @@ impl CodeGen {
                 self.temp_counter += 1;
 
                 // Extract boolean value from stack top
-                // Assume stack cell layout: tag (i32) at offset 0, value union at offset 8
-                let tag_ptr = self.fresh_temp();
-                let tag_val = self.fresh_temp();
+                // StackCell C layout (from runtime/stack.h):
+                //   - tag: i32 at offset 0 (4 bytes)
+                //   - padding: 4 bytes (for union alignment)
+                //   - value union at offset 8 (16 bytes total - largest member is variant struct)
+                //   - next: ptr at offset 24 (8 bytes)
+                // LLVM struct: { i32, [4 x i8], [16 x i8], ptr } = 32 bytes
                 let bool_ptr = self.fresh_temp();
                 let bool_val = self.fresh_temp();
                 let rest_ptr = self.fresh_temp();
 
-                // StackCell layout in C: tag (i32=4B) + padding (4B) + union (8B) + next (8B) = 24B
-                // LLVM struct: { i32, i32, i64, ptr } to match C layout with padding
-
-                // Get bool value from union - it's stored as bool (i8) at offset 8
-                writeln!(&mut self.output, "  %{} = getelementptr inbounds {{ i32, i32, i64, ptr }}, ptr %{}, i32 0, i32 2", bool_ptr, stack)
+                // Get bool value from union at offset 8 (field index 2)
+                // Bool is stored as i8 in the first byte of the 16-byte union
+                writeln!(&mut self.output, "  %{} = getelementptr inbounds {{ i32, [4 x i8], [16 x i8], ptr }}, ptr %{}, i32 0, i32 2, i32 0", bool_ptr, stack)
                     .map_err(|e| CodegenError::InternalError(e.to_string()))?;
-                writeln!(&mut self.output, "  %{} = load i64, ptr %{}", bool_val, bool_ptr)
+                writeln!(&mut self.output, "  %{} = load i8, ptr %{}", bool_val, bool_ptr)
                     .map_err(|e| CodegenError::InternalError(e.to_string()))?;
-                writeln!(&mut self.output, "  %cond = trunc i64 %{} to i1", bool_val)
+                writeln!(&mut self.output, "  %cond = trunc i8 %{} to i1", bool_val)
                     .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
-                // Get rest of stack (next pointer at offset 16)
-                writeln!(&mut self.output, "  %{} = getelementptr inbounds {{ i32, i32, i64, ptr }}, ptr %{}, i32 0, i32 3", rest_ptr, stack)
+                // Get rest of stack (next pointer at field index 3)
+                writeln!(&mut self.output, "  %{} = getelementptr inbounds {{ i32, [4 x i8], [16 x i8], ptr }}, ptr %{}, i32 0, i32 3", rest_ptr, stack)
                     .map_err(|e| CodegenError::InternalError(e.to_string()))?;
                 writeln!(&mut self.output, "  %rest = load ptr, ptr %{}", rest_ptr)
                     .map_err(|e| CodegenError::InternalError(e.to_string()))?;

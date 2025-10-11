@@ -325,3 +325,57 @@ fn test_tail_call_optimization() {
     std::fs::remove_file("test_tail_call_exe").ok();
     std::fs::remove_file("test_tail_call_exe.ll").ok();
 }
+
+#[test]
+fn test_if_false_branch() {
+    // Build runtime
+    let runtime_status = Command::new("just")
+        .arg("build-runtime")
+        .status()
+        .expect("Failed to build runtime");
+
+    assert!(runtime_status.success());
+
+    // : test_if_false ( -- Int ) false if [ 42 ] [ 99 ] ;
+    // Should take the else branch and return 99
+    let word = WordDef {
+        name: "test_if_false".to_string(),
+        effect: Effect {
+            inputs: StackType::Empty,
+            outputs: StackType::Empty.push(Type::Int),
+        },
+        body: vec![
+            Expr::BoolLit(false),  // Push false
+            Expr::If {
+                then_branch: Box::new(Expr::Quotation(vec![Expr::IntLit(42)])),
+                else_branch: Box::new(Expr::Quotation(vec![Expr::IntLit(99)])),
+            },
+        ],
+    };
+
+    let program = Program {
+        type_defs: vec![],
+        word_defs: vec![word],
+    };
+
+    // Generate and link
+    let mut codegen = CodeGen::new();
+    let ir = codegen.compile_program_with_main(&program, Some("test_if_false"))
+        .expect("Failed to generate IR");
+
+    link_program(&ir, "runtime/libcem_runtime.a", "test_if_false_exe")
+        .expect("Failed to link");
+
+    // Run and check output - should print 99 (false branch)
+    let output = Command::new("./test_if_false_exe")
+        .output()
+        .expect("Failed to run executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("99"), "Expected 99 from false branch, got: {}", stdout);
+
+    // Clean up
+    std::fs::remove_file("test_if_false_exe").ok();
+    std::fs::remove_file("test_if_false_exe.ll").ok();
+}
