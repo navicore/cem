@@ -35,7 +35,9 @@ pub use error::{CodegenError, CodegenResult};
 pub use ir::IRGenerator;
 pub use linker::{compile_to_object, link_program};
 
-use crate::ast::{Expr, Program, WordDef, SourceLoc};
+use crate::ast::{Expr, Program, WordDef};
+#[cfg(test)]
+use crate::ast::SourceLoc;
 use std::fmt::Write as _;
 use std::process::Command;
 
@@ -312,8 +314,17 @@ impl CodeGen {
         let cu_id = self.fresh_metadata_id();
         self.compile_unit_id = Some(cu_id);
 
-        // Get the first file as the main compile unit file (or use a default)
-        let main_file_id = self.file_metadata.values().next().copied().unwrap_or(0);
+        // Get the main compile unit file (deterministic: pick lowest ID)
+        // For empty programs, create a placeholder file
+        let main_file_id = if self.file_metadata.is_empty() {
+            let placeholder_id = self.fresh_metadata_id();
+            writeln!(&mut self.output, "!{} = !DIFile(filename: \"<empty>\", directory: \".\")", placeholder_id)
+                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+            placeholder_id
+        } else {
+            // Use the file with the smallest ID for determinism
+            *self.file_metadata.values().min().unwrap()
+        };
 
         writeln!(&mut self.output,
             "!{} = distinct !DICompileUnit(language: DW_LANG_C, file: !{}, producer: \"Cem Compiler\", isOptimized: false, runtimeVersion: 0, emissionKind: FullDebug)",

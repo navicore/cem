@@ -4,7 +4,9 @@ Core type checker for Cem
 Implements bidirectional type checking with stack effect inference.
 */
 use crate::ast::types::{Effect, StackType, Type};
-use crate::ast::{Expr, MatchBranch, Pattern, Program, SourceLoc, WordDef};
+use crate::ast::{Expr, MatchBranch, Pattern, Program, WordDef};
+#[cfg(test)]
+use crate::ast::SourceLoc;
 use crate::typechecker::environment::Environment;
 use crate::typechecker::errors::{TypeError, TypeResult};
 use crate::typechecker::unification::{unify_stack_types, unify_types};
