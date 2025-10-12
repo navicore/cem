@@ -48,6 +48,10 @@ static size_t g_page_size = 0;
 // Note: We use the full Scheduler type from scheduler.h here, not the forward declaration
 static Scheduler* g_scheduler = NULL;
 
+// Forward declarations for signal-safe helpers (defined later in this file)
+static void signal_safe_write(const char* str);
+static void size_to_str(size_t n, char* buf, size_t bufsize);
+
 /**
  * Get system page size (cached)
  *
@@ -236,10 +240,18 @@ size_t stack_get_free(const StackMetadata* meta, uintptr_t current_sp) {
  * Grow a stack to a new size
  *
  * This is the core growth implementation used by both:
- * 1. Checkpoint-based proactive growth
- * 2. Emergency signal handler growth
+ * 1. Checkpoint-based proactive growth (in_signal_handler = false)
+ * 2. Emergency signal handler growth (in_signal_handler = true)
+ *
+ * When in_signal_handler is true, this function uses only async-signal-safe
+ * operations (no fprintf, uses signal_safe_write instead).
+ *
+ * @param strand - Strand whose stack to grow
+ * @param new_usable_size - New usable stack size (must be > current size)
+ * @param in_signal_handler - true if called from SIGSEGV handler, false otherwise
+ * @return true on success, false on failure
  */
-bool stack_grow(struct Strand* strand, size_t new_usable_size) {
+bool stack_grow(struct Strand* strand, size_t new_usable_size, bool in_signal_handler) {
     assert(strand != NULL);
     assert(strand->stack_meta != NULL);
 
@@ -248,15 +260,24 @@ bool stack_grow(struct Strand* strand, size_t new_usable_size) {
 
     // Validate new size
     if (new_usable_size <= old_meta->usable_size) {
-        fprintf(stderr, "stack_grow: new size %zu must be > current size %zu\n",
-                new_usable_size, old_meta->usable_size);
+        if (in_signal_handler) {
+            signal_safe_write("ERROR: stack_grow: new size must be > current size\n");
+        } else {
+            fprintf(stderr, "stack_grow: new size %zu must be > current size %zu\n",
+                    new_usable_size, old_meta->usable_size);
+        }
         return false;
     }
 
     if (new_usable_size > CEM_MAX_STACK_SIZE) {
-        fprintf(stderr, "stack_grow: strand %llu hit maximum stack size (%d bytes)\n",
-                (unsigned long long)strand->id, CEM_MAX_STACK_SIZE);
-        fprintf(stderr, "  This usually indicates infinite recursion or excessive local variables.\n");
+        if (in_signal_handler) {
+            signal_safe_write("ERROR: Maximum stack size reached\n");
+            signal_safe_write("  This usually indicates infinite recursion\n");
+        } else {
+            fprintf(stderr, "stack_grow: strand %llu hit maximum stack size (%d bytes)\n",
+                    (unsigned long long)strand->id, CEM_MAX_STACK_SIZE);
+            fprintf(stderr, "  This usually indicates infinite recursion or excessive local variables.\n");
+        }
         return false;
     }
 
@@ -266,8 +287,12 @@ bool stack_grow(struct Strand* strand, size_t new_usable_size) {
     // Allocate new stack
     StackMetadata* new_meta = stack_alloc(new_usable_size);
     if (!new_meta) {
-        fprintf(stderr, "stack_grow: failed to allocate new stack of size %zu\n",
-                new_usable_size);
+        if (in_signal_handler) {
+            signal_safe_write("ERROR: Failed to allocate new stack\n");
+        } else {
+            fprintf(stderr, "stack_grow: failed to allocate new stack of size %zu\n",
+                    new_usable_size);
+        }
         return false;
     }
 
@@ -389,9 +414,18 @@ bool stack_grow(struct Strand* strand, size_t new_usable_size) {
 
     // Log growth (useful for debugging/tuning)
     if (new_meta->growth_count <= 3 || (new_meta->growth_count % 10) == 0) {
-        fprintf(stderr, "INFO: Strand %llu stack grew %zu -> %zu bytes (growth #%u)\n",
-                (unsigned long long)strand->id, old_usable_size, new_meta->usable_size,
-                new_meta->growth_count);
+        if (in_signal_handler) {
+            // Use signal-safe logging with minimal formatting
+            signal_safe_write("INFO: Stack grew to ");
+            char buf[32];
+            size_to_str(new_meta->usable_size, buf, sizeof(buf));
+            signal_safe_write(buf);
+            signal_safe_write(" bytes\n");
+        } else {
+            fprintf(stderr, "INFO: Strand %llu stack grew %zu -> %zu bytes (growth #%u)\n",
+                    (unsigned long long)strand->id, old_usable_size, new_meta->usable_size,
+                    new_meta->growth_count);
+        }
     }
 
     return true;
@@ -441,7 +475,7 @@ bool stack_check_and_grow(struct Strand* strand, uintptr_t current_sp) {
     fprintf(stderr, "INFO: Strand %llu growing stack (%s): %zu/%zu bytes used, %zu free\n",
             (unsigned long long)strand->id, reason, used, meta->usable_size, free);
 
-    return stack_grow(strand, new_size);
+    return stack_grow(strand, new_size, false);  // Not in signal handler
 }
 
 // ============================================================================
@@ -461,6 +495,38 @@ static void signal_safe_write(const char* str) {
     size_t len = 0;
     while (str[len]) len++;
     write(2, str, len);  // 2 = STDERR_FILENO
+}
+
+/**
+ * Convert size_t to string (async-signal-safe)
+ *
+ * Writes decimal representation of n into buffer.
+ * Buffer must be at least 21 bytes (max digits in 64-bit number + null).
+ */
+static void size_to_str(size_t n, char* buf, size_t bufsize) {
+    if (bufsize == 0) return;
+
+    // Handle zero specially
+    if (n == 0) {
+        buf[0] = '0';
+        buf[1] = '\0';
+        return;
+    }
+
+    // Convert to string (reversed)
+    size_t i = 0;
+    while (n > 0 && i < bufsize - 1) {
+        buf[i++] = '0' + (n % 10);
+        n /= 10;
+    }
+    buf[i] = '\0';
+
+    // Reverse the string
+    for (size_t j = 0; j < i / 2; j++) {
+        char tmp = buf[j];
+        buf[j] = buf[i - 1 - j];
+        buf[i - 1 - j] = tmp;
+    }
 }
 
 /**
@@ -518,7 +584,7 @@ static void stack_sigsegv_handler(int sig, siginfo_t *si, void *unused) {
 
             // Attempt emergency growth
             size_t new_size = strand->stack_meta->usable_size * 2;
-            if (stack_grow(strand, new_size)) {
+            if (stack_grow(strand, new_size, true)) {  // IN SIGNAL HANDLER - use safe logging
                 signal_safe_write("INFO: Emergency growth succeeded\n");
                 // Return and retry the faulting instruction
                 return;

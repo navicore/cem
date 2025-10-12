@@ -40,7 +40,8 @@
  * This implementation makes STRONG assumptions about the threading model:
  *
  * 1. **Single-threaded cooperative scheduler only**
- *    - Cem uses cooperative multitasking with explicit yield points
+ *    - Cem currently uses ONE OS thread for all strands (see README.md "Concurrency Model")
+ *    - Cooperative multitasking with explicit yield points at I/O operations
  *    - No OS-level preemption between strands
  *    - Only ONE strand executes at a time
  *
@@ -129,7 +130,7 @@ void stack_free(StackMetadata* meta);
  * Check if stack needs to grow and grow if necessary (checkpoint-based)
  *
  * Called at context switch checkpoints. Implements the hybrid growth strategy:
- * - Grow if free space < CEM_MIN_FREE_STACK (8KB), OR
+ * - Grow if free space < CEM_MIN_FREE_STACK (2KB), OR
  * - Grow if used > 75% of total
  *
  * This is the PRIMARY growth mechanism (not the signal handler).
@@ -146,11 +147,15 @@ bool stack_check_and_grow(struct Strand* strand, uintptr_t current_sp);
  * Allocates a new larger stack, copies contents, updates context pointers.
  * This is called by both checkpoint-based growth and emergency signal handler.
  *
+ * When in_signal_handler is true, only async-signal-safe functions are used
+ * (no fprintf, uses signal_safe_write instead).
+ *
  * @param strand - Strand whose stack to grow
  * @param new_usable_size - New usable stack size (must be > current size)
+ * @param in_signal_handler - true if called from SIGSEGV handler, false otherwise
  * @return true on success, false on failure
  */
-bool stack_grow(struct Strand* strand, size_t new_usable_size);
+bool stack_grow(struct Strand* strand, size_t new_usable_size, bool in_signal_handler);
 
 // ============================================================================
 // Emergency Guard Page Handler
@@ -168,20 +173,21 @@ bool stack_grow(struct Strand* strand, size_t new_usable_size);
  * If not, it re-raises the signal for normal crash handling.
  *
  * IMPORTANT - ASYNC-SIGNAL-SAFETY:
- * The signal handler is carefully designed to be async-signal-safe:
- * - Uses write() instead of fprintf() for all output
- * - Calls stack_grow() which uses mmap/munmap/memcpy (all signal-safe)
+ * The signal handler is designed to be async-signal-safe:
+ * - Uses write() instead of fprintf() for all output in signal context
+ * - stack_grow() detects signal context and uses only signal-safe functions
+ * - Calls mmap/munmap/memcpy (all async-signal-safe per POSIX)
  * - Accesses g_scheduler without locks (safe in cooperative single-threaded model)
  *
- * LIMITATIONS:
- * - stack_grow() calls fprintf() for logging (NOT signal-safe, but acceptably risky)
+ * REMAINING LIMITATIONS:
+ * - malloc/free in stack_alloc() are NOT async-signal-safe
+ *   * Risk: If SIGSEGV arrives during malloc(), calling malloc() in handler may deadlock
+ *   * Mitigation: Could pre-allocate emergency stack metadata (future work)
  * - If stack_grow() is interrupted by another signal, behavior is undefined
- * - malloc/free in stack metadata are NOT signal-safe (but should be safe in practice)
+ *   * Mitigation: Could block signals during growth with sigprocmask() (future work)
  *
- * If these limitations become problematic, consider:
- * - Disabling signals during stack growth (sigprocmask)
- * - Pre-allocating emergency stack metadata
- * - Removing all fprintf() calls from growth path
+ * These limitations are acceptable for the current single-threaded cooperative
+ * scheduler, but should be addressed if porting to multi-threaded or real-time use
  */
 void stack_guard_init_signal_handler(void);
 

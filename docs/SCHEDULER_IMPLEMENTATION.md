@@ -4,14 +4,19 @@
 
 This document outlines the phased implementation of Cem's green thread scheduler, designed to support Erlang-scale concurrency (hundreds of thousands of strands) while providing a pragmatic path to get there.
 
+**Current Status:** Single-threaded cooperative scheduler (Phases 1-3 complete). All strands run on one OS thread with non-blocking I/O. Multi-threaded work-stealing is planned for Phase 4+.
+
 ## Vision
 
 Create a scheduler that supports:
-- Hundreds of thousands to millions of concurrent strands
-- Tiny memory footprint per strand (2-4KB initially, growing as needed)
+- Hundreds of thousands to millions of concurrent strands (✅ Phase 3)
+- Tiny memory footprint per strand (✅ 4KB-1MB dynamic stacks)
 - True "actors everywhere" programming model
-- Cooperative multitasking with explicit yield points at I/O operations
+- Cooperative multitasking with explicit yield points at I/O operations (✅ Phase 2a)
+- Single OS thread event loop (✅ Current - Phase 1-3)
 - Deterministic ordering through stack concatenation
+
+**Future (Phase 4+):** Multi-threaded work-stealing scheduler for CPU-bound parallelism
 
 ## Architecture Phases
 
