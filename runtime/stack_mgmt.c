@@ -17,7 +17,16 @@
 // Forward declare sysconf to avoid including unistd.h
 // (unistd.h conflicts with stack.h's dup() function)
 extern long sysconf(int);
-#define _SC_PAGESIZE 29  // macOS value
+
+// Platform-specific _SC_PAGESIZE values
+// These values are OS-specific, not architecture-specific
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+    #define _SC_PAGESIZE 29  // BSD-based systems (macOS, FreeBSD, etc.)
+#elif defined(__linux__)
+    #define _SC_PAGESIZE 30  // Linux
+#else
+    #error "Unknown platform for _SC_PAGESIZE constant"
+#endif
 
 // ============================================================================
 // Platform Detection & Configuration
@@ -228,7 +237,14 @@ bool stack_grow(struct Strand* strand, size_t new_usable_size) {
 
     // Update context pointers
     // SP: already calculated above
-    // FP (x29 on ARM64, rbp on x86-64): adjust by offset
+    // FP (x29 on ARM64, rbp on x86-64): adjust based on offset from stack TOP
+    //
+    // IMPORTANT: Frame pointers are relative to the stack top, not the base.
+    // Since stacks grow downward, we need to maintain the same offset from the top.
+    //
+    // Calculation:
+    // - old_offset_from_top = old_stack_top - old_fp
+    // - new_fp = new_stack_top - old_offset_from_top
 
     #ifdef CEM_ARCH_ARM64
         // Update stack pointer
@@ -237,8 +253,8 @@ bool stack_grow(struct Strand* strand, size_t new_usable_size) {
         // Update frame pointer (x29) - but only if it points into the old stack
         if (strand->context.x29 >= (uintptr_t)old_meta->usable_base &&
             strand->context.x29 <= old_stack_top) {
-            strand->context.x29 = strand->context.x29 - (uintptr_t)old_meta->usable_base
-                                  + (uintptr_t)new_meta->usable_base;
+            uintptr_t offset_from_top = old_stack_top - strand->context.x29;
+            strand->context.x29 = new_stack_top - offset_from_top;
         }
 
         // Note: x30 (LR) contains return addresses, not stack pointers
@@ -251,25 +267,46 @@ bool stack_grow(struct Strand* strand, size_t new_usable_size) {
         // Update frame pointer (rbp)
         if (strand->context.rbp >= (uintptr_t)old_meta->usable_base &&
             strand->context.rbp <= old_stack_top) {
-            strand->context.rbp = strand->context.rbp - (uintptr_t)old_meta->usable_base
-                                  + (uintptr_t)new_meta->usable_base;
+            uintptr_t offset_from_top = old_stack_top - strand->context.rbp;
+            strand->context.rbp = new_stack_top - offset_from_top;
         }
 
-        // TODO: x86-64 has return addresses on stack - need to walk stack frames
-        // and adjust those too. This is complex! For now, we'll rely on
-        // checkpoints catching growth before returns are on the stack.
+        // LIMITATION: x86-64 return addresses need adjustment
+        //
+        // Unlike ARM64 (which stores return addresses in LR register), x86-64 stores
+        // return addresses directly on the stack. When we copy the stack to a new
+        // location, these return addresses become invalid pointers into the old stack.
+        //
+        // To fix this properly, we would need to:
+        // 1. Walk the stack frames (following rbp chain)
+        // 2. For each frame, find the return address
+        // 3. Adjust it by the stack relocation offset
+        //
+        // This is complex and error-prone. For now, we rely on the checkpoint-based
+        // growth strategy catching stack growth BEFORE any function calls push return
+        // addresses onto the stack. This works because:
+        // - Checkpoints run at every context switch (before strand executes)
+        // - Growth happens proactively (8KB free space minimum)
+        // - Emergency guard page is a safety net (should never be hit)
+        //
+        // FUTURE: If x86-64 support becomes critical and guard pages are being hit,
+        // implement proper return address adjustment via stack frame walking.
 
     #endif
+
+    // Save values we need before freeing old_meta
+    uint32_t old_growth_count = old_meta->growth_count;
+    size_t old_usable_size = old_meta->usable_size;
 
     // Update strand metadata
     stack_free(old_meta);
     strand->stack_meta = new_meta;
-    new_meta->growth_count = old_meta->growth_count + 1;
+    new_meta->growth_count = old_growth_count + 1;
 
     // Log growth (useful for debugging/tuning)
     if (new_meta->growth_count <= 3 || (new_meta->growth_count % 10) == 0) {
         fprintf(stderr, "INFO: Strand %llu stack grew %zu -> %zu bytes (growth #%u)\n",
-                (unsigned long long)strand->id, old_meta->usable_size, new_meta->usable_size,
+                (unsigned long long)strand->id, old_usable_size, new_meta->usable_size,
                 new_meta->growth_count);
     }
 
@@ -323,6 +360,21 @@ bool stack_check_and_grow(struct Strand* strand, uintptr_t current_sp) {
 // ============================================================================
 
 /**
+ * Async-signal-safe string write helper
+ *
+ * write() is async-signal-safe, fprintf() is not.
+ * Use this in signal handlers to avoid deadlocks.
+ */
+static void signal_safe_write(const char* str) {
+    // Forward declare write() to avoid including unistd.h
+    extern ssize_t write(int, const void*, size_t);
+
+    size_t len = 0;
+    while (str[len]) len++;
+    write(2, str, len);  // 2 = STDERR_FILENO
+}
+
+/**
  * Check if an address is within a guard page
  */
 bool stack_is_guard_page_fault(uintptr_t addr, const StackMetadata* meta) {
@@ -351,35 +403,33 @@ static void stack_sigsegv_handler(int sig, siginfo_t *si, void *unused) {
 
         if (stack_is_guard_page_fault(fault_addr, strand->stack_meta)) {
             // EMERGENCY GROWTH - guard page was hit!
-            fprintf(stderr, "\n");
-            fprintf(stderr, "========================================\n");
-            fprintf(stderr, "WARNING: Guard page hit for strand %llu!\n",
-                    (unsigned long long)strand->id);
-            fprintf(stderr, "========================================\n");
-            fprintf(stderr, "Fault address: %p\n", si->si_addr);
-            fprintf(stderr, "This indicates the checkpoint heuristic failed to predict stack growth.\n");
-            fprintf(stderr, "The stack will be grown now, but this is a FALLBACK mechanism.\n");
-            fprintf(stderr, "Consider tuning CEM_MIN_FREE_STACK if this happens frequently.\n");
-            fprintf(stderr, "\n");
+            // Use async-signal-safe write() instead of fprintf()
+            signal_safe_write("\n");
+            signal_safe_write("========================================\n");
+            signal_safe_write("WARNING: Guard page hit!\n");
+            signal_safe_write("========================================\n");
+            signal_safe_write("This indicates the checkpoint heuristic failed to predict stack growth.\n");
+            signal_safe_write("The stack will be grown now, but this is a FALLBACK mechanism.\n");
+            signal_safe_write("Consider tuning CEM_MIN_FREE_STACK if this happens frequently.\n");
+            signal_safe_write("\n");
 
             strand->stack_meta->guard_hit = true;
 
             // Attempt emergency growth
             size_t new_size = strand->stack_meta->usable_size * 2;
             if (stack_grow(strand, new_size)) {
-                fprintf(stderr, "INFO: Emergency growth succeeded: %zu bytes\n", new_size);
+                signal_safe_write("INFO: Emergency growth succeeded\n");
                 // Return and retry the faulting instruction
                 return;
             } else {
-                fprintf(stderr, "FATAL: Emergency growth failed - strand %llu will crash\n",
-                        (unsigned long long)strand->id);
+                signal_safe_write("FATAL: Emergency growth failed - strand will crash\n");
                 // Fall through to default handler (crash)
             }
         }
     }
 
     // Not our stack overflow - re-raise signal for normal crash handling
-    fprintf(stderr, "SIGSEGV: addr=%p (not a guard page fault)\n", si->si_addr);
+    signal_safe_write("SIGSEGV: not a guard page fault\n");
     signal(SIGSEGV, SIG_DFL);
     raise(SIGSEGV);
 }
