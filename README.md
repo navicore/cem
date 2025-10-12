@@ -101,7 +101,24 @@ See [EXAMPLES.md](EXAMPLES.md) for more code examples.
 
 ## Building
 
-*(To be added once implementation begins)*
+Cem requires:
+- Rust toolchain (stable)
+- Clang (for C runtime compilation)
+- LLVM tools (`llc`, `lli`)
+
+**Platform Support**: Currently macOS and FreeBSD only (uses kqueue for async I/O). Linux support (epoll) is planned for a future release.
+
+Build the compiler and runtime:
+```bash
+cargo build
+just build-runtime
+```
+
+Compile and run examples:
+```bash
+cargo run --example compile_hello_io
+./hello_io
+```
 
 ## Debugging
 

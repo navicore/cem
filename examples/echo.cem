@@ -1,0 +1,6 @@
+# echo.cem - Echo program with async I/O
+#
+# Reads a line from stdin and writes it to stdout
+
+: echo ( -- )
+  read_line write_line ;

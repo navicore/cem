@@ -227,6 +227,22 @@ impl CodeGen {
         writeln!(&mut self.output, "declare ptr @test_yield(ptr)")
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
+        // I/O operations (async)
+        writeln!(&mut self.output, "declare ptr @write_line(ptr)")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output, "declare ptr @read_line(ptr)")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+        // Scheduler operations
+        writeln!(&mut self.output, "declare void @scheduler_init()")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output, "declare ptr @scheduler_run()")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output, "declare void @scheduler_shutdown()")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output, "declare i64 @strand_spawn(ptr, ptr)")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
         // Utility functions
         writeln!(&mut self.output, "declare void @print_stack(ptr)")
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
@@ -251,18 +267,44 @@ impl CodeGen {
     /// }
     /// ```
     fn emit_main_function(&mut self, entry_word: &str) -> CodegenResult<()> {
+        // Avoid name collision - if entry word is "main", it was renamed to "cem_main"
+        let function_name = if entry_word == "main" {
+            "cem_main"
+        } else {
+            entry_word
+        };
+
         writeln!(&mut self.output, "; Main function")
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
         writeln!(&mut self.output, "define i32 @main() {{")
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
         writeln!(&mut self.output, "entry:")
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
-        writeln!(&mut self.output, "  %stack = call ptr @{}(ptr null)", entry_word)
+
+        // Initialize scheduler for async I/O
+        writeln!(&mut self.output, "  call void @scheduler_init()")
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+        // Spawn entry word as a strand
+        writeln!(&mut self.output, "  call i64 @strand_spawn(ptr @{}, ptr null)", function_name)
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+        // Run scheduler (returns final stack from main strand)
+        writeln!(&mut self.output, "  %stack = call ptr @scheduler_run()")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+        // Shutdown scheduler
+        writeln!(&mut self.output, "  call void @scheduler_shutdown()")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+        // Print final stack (for debugging/testing)
         writeln!(&mut self.output, "  call void @print_stack(ptr %stack)")
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+        // Clean up
         writeln!(&mut self.output, "  call void @free_stack(ptr %stack)")
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
         writeln!(&mut self.output, "  ret i32 0")
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
         writeln!(&mut self.output, "}}")
@@ -473,8 +515,15 @@ impl CodeGen {
         // Set current subprogram for debug location generation
         self.current_subprogram_id = Some(subprogram_id);
 
+        // Avoid name collision with C main() - prefix Cem "main" word with "cem_"
+        let function_name = if word.name == "main" {
+            "cem_main".to_string()
+        } else {
+            word.name.clone()
+        };
+
         // Emit function definition with debug metadata attachment
-        writeln!(&mut self.output, "define ptr @{}(ptr %stack) !dbg !{} {{", word.name, subprogram_id)
+        writeln!(&mut self.output, "define ptr @{}(ptr %stack) !dbg !{} {{", function_name, subprogram_id)
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
         writeln!(&mut self.output, "entry:")
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
@@ -605,8 +654,9 @@ impl CodeGen {
                 );
                 self.output = global_decl + &self.output;
 
-                let result = self.fresh_temp();
+                // Allocate temps in the order they'll be used in the IR
                 let ptr_temp = self.fresh_temp();
+                let result = self.fresh_temp();
                 let dbg = self.dbg_annotation(loc);
 
                 writeln!(

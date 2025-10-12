@@ -111,7 +111,8 @@ build-runtime:
     @echo "Building C runtime library..."
     cd runtime && clang -Wall -Wextra -std=c11 -g -O2 -c stack.c -o stack.o
     cd runtime && clang -Wall -Wextra -std=c11 -g -O2 -c scheduler.c -o scheduler.o
-    cd runtime && ar rcs libcem_runtime.a stack.o scheduler.o
+    cd runtime && clang -Wall -Wextra -std=c11 -g -O2 -c io.c -o io.o
+    cd runtime && ar rcs libcem_runtime.a stack.o scheduler.o io.o
     @echo "✅ Built runtime/libcem_runtime.a"
 
 # Build runtime test program

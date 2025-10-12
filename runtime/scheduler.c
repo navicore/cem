@@ -2,23 +2,44 @@
  * Cem Runtime - Green Thread Scheduler Implementation
  *
  * This file implements the cooperative scheduler for Cem's green threads
- * (strands). The scheduler uses setjmp/longjmp for context switching and
- * maintains a simple FIFO ready queue.
+ * (strands). The scheduler uses ucontext (makecontext/swapcontext) for
+ * context switching and maintains a simple FIFO ready queue.
  *
- * Phase 1 Implementation (current):
- * - Basic strand structure
+ * Phase 2a Implementation (current):
+ * - Basic strand structure with ucontext_t
  * - FIFO ready queue
- * - Context switching via setjmp/longjmp
- * - Synthetic yields for testing
+ * - Context switching via makecontext/swapcontext
+ * - 64KB C stacks per strand
+ * - Target: ~10,000 concurrent strands
  *
- * Future phases will add I/O integration and go/wait primitives.
+ * See docs/SCHEDULER_IMPLEMENTATION.md for roadmap.
  */
 
-#define _POSIX_C_SOURCE 200809L
+// Platform check - kqueue is only available on BSD-based systems
+#if !defined(__APPLE__) && !defined(__FreeBSD__) && !defined(__OpenBSD__) && !defined(__NetBSD__)
+#error "This scheduler requires kqueue support (macOS, FreeBSD, OpenBSD, or NetBSD). Linux support (epoll) is planned for Phase 2b."
+#endif
+
+#define _XOPEN_SOURCE 700
 #include "scheduler.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/event.h>  // kqueue, kevent
+#include <sys/time.h>   // struct timespec
+
+// Forward declare close() to avoid including unistd.h (which conflicts with stack.h's dup())
+extern int close(int);
+extern int kqueue(void);
+
+// ============================================================================
+// Configuration Constants
+// ============================================================================
+
+// Phase 2a: 64KB stacks (generous for initial implementation)
+// Phase 2b will reduce this to 8KB with assembly context switching
+// Phase 3 will use 2-4KB with dynamic growth
+#define STRAND_STACK_SIZE (64 * 1024)
 
 // ============================================================================
 // Global Scheduler State
@@ -32,7 +53,11 @@ static bool scheduler_initialized = false;
 // ============================================================================
 
 /**
- * Allocate and initialize a new strand
+ * Allocate and initialize a new strand (without setting entry function)
+ *
+ * This allocates the strand structure and its C stack, but does not
+ * initialize the context with an entry function. Use strand_init_context()
+ * for that.
  */
 static Strand* strand_alloc(uint64_t id, StackCell* initial_stack) {
     Strand* strand = (Strand*)malloc(sizeof(Strand));
@@ -40,13 +65,22 @@ static Strand* strand_alloc(uint64_t id, StackCell* initial_stack) {
         runtime_error("strand_alloc: out of memory");
     }
 
+    // Allocate C stack for context switching
+    strand->c_stack = malloc(STRAND_STACK_SIZE);
+    if (!strand->c_stack) {
+        free(strand);
+        runtime_error("strand_alloc: out of memory allocating stack");
+    }
+
     strand->id = id;
     strand->state = STRAND_READY;
     strand->stack = initial_stack;
+    strand->c_stack_size = STRAND_STACK_SIZE;
+    strand->blocked_fd = -1;  // Not blocked on any FD initially
     strand->next = NULL;
 
-    // Note: context will be set via setjmp when strand first runs
-    memset(&strand->context, 0, sizeof(jmp_buf));
+    // Initialize context (but don't set entry function yet)
+    memset(&strand->context, 0, sizeof(ucontext_t));
 
     return strand;
 }
@@ -57,8 +91,13 @@ static Strand* strand_alloc(uint64_t id, StackCell* initial_stack) {
 static void strand_free(Strand* strand) {
     if (!strand) return;
 
-    // Free the strand's stack
+    // Free the Cem stack
     free_stack(strand->stack);
+
+    // Free the C stack
+    if (strand->c_stack) {
+        free(strand->c_stack);
+    }
 
     free(strand);
 }
@@ -70,7 +109,7 @@ static void strand_free(Strand* strand) {
 void ready_queue_push(Strand* strand) {
     if (!strand) return;
 
-    strand->state = STRAND_READY;
+    // Note: Don't modify the strand's state here - the caller sets it
     strand->next = NULL;
 
     if (global_scheduler.ready_queue_tail) {
@@ -117,6 +156,12 @@ void scheduler_init(void) {
     memset(&global_scheduler, 0, sizeof(Scheduler));
     global_scheduler.next_strand_id = 1;  // Start IDs at 1 (0 reserved for main)
 
+    // Initialize kqueue for async I/O (macOS/FreeBSD)
+    global_scheduler.kqueue_fd = kqueue();
+    if (global_scheduler.kqueue_fd == -1) {
+        runtime_error("scheduler_init: kqueue() failed");
+    }
+
     scheduler_initialized = true;
 }
 
@@ -131,10 +176,23 @@ void scheduler_shutdown(void) {
         strand_free(strand);
     }
 
+    // Free all strands in blocked list
+    while (global_scheduler.blocked_list) {
+        Strand* strand = global_scheduler.blocked_list;
+        global_scheduler.blocked_list = strand->next;
+        strand_free(strand);
+    }
+
     // Free current strand if any
     if (global_scheduler.current_strand) {
         strand_free(global_scheduler.current_strand);
         global_scheduler.current_strand = NULL;
+    }
+
+    // Close kqueue
+    if (global_scheduler.kqueue_fd != -1) {
+        close(global_scheduler.kqueue_fd);
+        global_scheduler.kqueue_fd = -1;
     }
 
     scheduler_initialized = false;
@@ -144,63 +202,88 @@ void scheduler_shutdown(void) {
 // Strand Spawning
 // ============================================================================
 
-// ============================================================================
-// Phase 1 Note: Simplified Strand Model
-// ============================================================================
-//
-// For Phase 1, we implement a simplified model:
-// - Only the main execution thread (not true strand spawning yet)
-// - Focus on testing yield mechanism and scheduler infrastructure
-// - Future phases will add proper context initialization via makecontext
-//   or platform-specific assembly
-//
-// This gives us:
-// ✓ Scheduler infrastructure (ready queue, state machine)
-// ✓ Basic context structures and lifecycle functions
-// ✓ Test harness for validation (test_yield linkage)
-//
-// NOT yet implemented:
-// ✗ True concurrent strand spawning
-// ✗ Multiple isolated stacks
-// ✗ go/wait primitives
-// ✗ Functional context switching (setjmp/longjmp state not initialized)
-//
-// IMPORTANT: strand_spawn() and strand_yield() are NON-FUNCTIONAL stubs.
-// They will be properly implemented in Phase 2 when I/O integration
-// requires actual concurrency. For now, they exist to:
-// - Validate API design
-// - Allow test_yield() linkage testing
-// - Provide structure for future implementation
+/**
+ * Trampoline function for strand entry
+ *
+ * makecontext() requires a function with int arguments, but we want to pass
+ * a function pointer and stack pointer. We read these from the current strand
+ * structure instead.
+ */
+static void strand_entry_trampoline(void) {
+    // Get the current strand (set by scheduler before swapping to us)
+    Strand* strand = global_scheduler.current_strand;
+    if (!strand) {
+        runtime_error("strand_entry_trampoline: no current strand");
+    }
 
-#ifdef PHASE_2_CONCURRENCY
-// Phase 2: Full implementation (not yet enabled)
+    // Get the entry function and initial stack from the strand
+    StackCell* (*entry_func)(StackCell*) = strand->entry_func;
+    StackCell* initial_stack = strand->stack;
+
+    // Run the entry function
+    StackCell* final_stack = entry_func(initial_stack);
+
+    // Strand completed - update state
+    strand->state = STRAND_COMPLETED;
+    strand->stack = final_stack;
+
+    // Return control to scheduler
+    // The scheduler will see the COMPLETED state and clean up
+    swapcontext(&strand->context, &global_scheduler.scheduler_context);
+}
+
+/**
+ * Spawn a new strand
+ *
+ * Creates a new strand that will execute the given entry function with
+ * the given initial stack. The strand is added to the ready queue.
+ */
 uint64_t strand_spawn(StackCell* (*entry_func)(StackCell*), StackCell* initial_stack) {
     if (!scheduler_initialized) {
         runtime_error("strand_spawn: scheduler not initialized");
     }
 
+    if (!entry_func) {
+        runtime_error("strand_spawn: entry_func is NULL");
+    }
+
+    // Allocate strand
     uint64_t id = global_scheduler.next_strand_id++;
     Strand* strand = strand_alloc(id, initial_stack);
 
+    // Initialize context
+    if (getcontext(&strand->context) == -1) {
+        strand_free(strand);
+        runtime_error("strand_spawn: getcontext failed");
+    }
+
+    // Store entry function in the strand for trampoline to use
+    strand->entry_func = entry_func;
+
+    // Set up context
+    strand->context.uc_stack.ss_sp = strand->c_stack;
+    strand->context.uc_stack.ss_size = strand->c_stack_size;
+    strand->context.uc_link = NULL;  // Don't auto-return, let trampoline handle it
+
+    // Create context (makecontext only accepts int args, so we use trampoline)
+    makecontext(&strand->context, strand_entry_trampoline, 0);
+
+    // Add to ready queue
     ready_queue_push(strand);
+
     return id;
 }
-#else
-// Phase 1: Stub implementation
-uint64_t strand_spawn(StackCell* (*entry_func)(StackCell*), StackCell* initial_stack) {
-    (void)entry_func;
-    (void)initial_stack;
-    runtime_error("strand_spawn: not implemented in Phase 1 (requires PHASE_2_CONCURRENCY)");
-    return 0;
-}
-#endif
 
 // ============================================================================
 // Yielding
 // ============================================================================
 
-#ifdef PHASE_2_CONCURRENCY
-// Phase 2: Full implementation (not yet enabled)
+/**
+ * Yield execution from the current strand back to the scheduler
+ *
+ * This cooperatively yields control, allowing other strands to run.
+ * The current strand is re-queued as READY and will be rescheduled later.
+ */
 void strand_yield(void) {
     if (!scheduler_initialized) {
         runtime_error("strand_yield: scheduler not initialized");
@@ -213,50 +296,242 @@ void strand_yield(void) {
     Strand* strand = global_scheduler.current_strand;
     strand->state = STRAND_YIELDED;
 
-    // Save current context and return to scheduler
-    if (setjmp(strand->context) == 0) {
-        // First call: returning to scheduler
-        longjmp(global_scheduler.scheduler_context, 1);
+    // Re-queue this strand for later execution
+    ready_queue_push(strand);
+
+    // Clear current strand (scheduler will pick it up again later)
+    global_scheduler.current_strand = NULL;
+
+    // Switch back to scheduler context
+    // The scheduler will resume us later when we're popped from the ready queue
+    swapcontext(&strand->context, &global_scheduler.scheduler_context);
+
+    // When we resume, execution continues here
+    // The strand state will have been set back to RUNNING by the scheduler
+}
+
+// ============================================================================
+// I/O Blocking Operations
+// ============================================================================
+
+/**
+ * Helper: Add a strand to the blocked list
+ */
+static void blocked_list_add(Strand* strand) {
+    if (!strand) return;
+
+    strand->next = global_scheduler.blocked_list;
+    global_scheduler.blocked_list = strand;
+}
+
+/**
+ * Helper: Remove a specific strand from the blocked list
+ * Returns true if found and removed, false otherwise
+ */
+static bool blocked_list_remove(Strand* strand) {
+    if (!strand || !global_scheduler.blocked_list) return false;
+
+    // Check if it's the head
+    if (global_scheduler.blocked_list == strand) {
+        global_scheduler.blocked_list = strand->next;
+        strand->next = NULL;
+        return true;
     }
 
-    // Second call: resumed from scheduler
-    // Execution continues here after the strand is rescheduled
+    // Search the rest of the list
+    Strand* prev = global_scheduler.blocked_list;
+    Strand* curr = prev->next;
+
+    while (curr) {
+        if (curr == strand) {
+            prev->next = curr->next;
+            curr->next = NULL;
+            return true;
+        }
+        prev = curr;
+        curr = curr->next;
+    }
+
+    return false;
 }
-#else
-// Phase 1: Stub implementation (non-functional)
-// NOTE: This function is not usable in Phase 1 because:
-// - global_scheduler.scheduler_context is never initialized
-// - No scheduler loop to return to
-// - Calling this would cause undefined behavior (longjmp to uninitialized jmp_buf)
-//
-// It exists as a stub to validate the API design. Do not call directly.
-// Use test_yield() instead, which is a safe no-op for testing.
-void strand_yield(void) {
-    runtime_error("strand_yield: not functional in Phase 1 (use test_yield for testing)");
+
+/**
+ * Block current strand on read I/O
+ */
+void strand_block_on_read(int fd) {
+    if (!scheduler_initialized) {
+        runtime_error("strand_block_on_read: scheduler not initialized");
+    }
+    if (!global_scheduler.current_strand) {
+        runtime_error("strand_block_on_read: no current strand");
+    }
+    if (fd < 0) {
+        runtime_error("strand_block_on_read: invalid file descriptor");
+    }
+
+    Strand* strand = global_scheduler.current_strand;
+    strand->state = STRAND_BLOCKED_READ;
+    strand->blocked_fd = fd;
+
+    // Register for read events with kqueue
+    struct kevent ev;
+    EV_SET(&ev, fd, EVFILT_READ, EV_ADD | EV_ONESHOT, 0, 0, strand);
+    if (kevent(global_scheduler.kqueue_fd, &ev, 1, NULL, 0, NULL) == -1) {
+        runtime_error("strand_block_on_read: kevent registration failed");
+    }
+
+    // Add to blocked list
+    blocked_list_add(strand);
+    global_scheduler.current_strand = NULL;
+
+    // Switch back to scheduler
+    swapcontext(&strand->context, &global_scheduler.scheduler_context);
+
+    // When we resume, clear the blocked_fd
+    strand->blocked_fd = -1;
 }
-#endif
+
+/**
+ * Block current strand on write I/O
+ */
+void strand_block_on_write(int fd) {
+    if (!scheduler_initialized) {
+        runtime_error("strand_block_on_write: scheduler not initialized");
+    }
+    if (!global_scheduler.current_strand) {
+        runtime_error("strand_block_on_write: no current strand");
+    }
+    if (fd < 0) {
+        runtime_error("strand_block_on_write: invalid file descriptor");
+    }
+
+    Strand* strand = global_scheduler.current_strand;
+    strand->state = STRAND_BLOCKED_WRITE;
+    strand->blocked_fd = fd;
+
+    // Register for write events with kqueue
+    struct kevent ev;
+    EV_SET(&ev, fd, EVFILT_WRITE, EV_ADD | EV_ONESHOT, 0, 0, strand);
+    if (kevent(global_scheduler.kqueue_fd, &ev, 1, NULL, 0, NULL) == -1) {
+        runtime_error("strand_block_on_write: kevent registration failed");
+    }
+
+    // Add to blocked list
+    blocked_list_add(strand);
+    global_scheduler.current_strand = NULL;
+
+    // Switch back to scheduler
+    swapcontext(&strand->context, &global_scheduler.scheduler_context);
+
+    // When we resume, clear the blocked_fd
+    strand->blocked_fd = -1;
+}
 
 // ============================================================================
 // Scheduler Main Loop
 // ============================================================================
 
 /**
- * Phase 1: Simplified execution model
+ * Run the scheduler until all strands complete
  *
- * For now, scheduler_run() is a placeholder that will be used in Phase 2
- * when we integrate I/O operations. The main program runs directly without
- * going through the scheduler.
+ * This is the main scheduler loop that:
+ * 1. Saves the scheduler's context (so strands can return here)
+ * 2. Picks the next ready strand
+ * 3. Switches to that strand
+ * 4. When strand yields or completes, loop continues
+ * 5. Returns when all strands are complete
  *
- * The yield mechanism (test_yield) still works for testing purposes, but
- * yields immediately return since there are no other strands to switch to.
+ * The scheduler uses cooperative multitasking - strands must explicitly
+ * call strand_yield() or complete to give control back.
  */
 StackCell* scheduler_run(void) {
     if (!scheduler_initialized) {
         runtime_error("scheduler_run: scheduler not initialized");
     }
 
-    // Phase 1: No strands to run yet
-    // This will be implemented properly in Phase 2 with I/O integration
+    // Initialize scheduler context
+    // This is the "home base" that strands return to when they yield
+    if (getcontext(&global_scheduler.scheduler_context) == -1) {
+        runtime_error("scheduler_run: getcontext failed");
+    }
+
+    // Main scheduler loop
+    while (true) {
+        // If we have ready strands, run them
+        if (!ready_queue_is_empty()) {
+            // Pop next ready strand
+            Strand* strand = ready_queue_pop();
+            if (!strand) {
+                break;  // No more strands (shouldn't happen if queue wasn't empty)
+            }
+
+            // Mark as running
+            strand->state = STRAND_RUNNING;
+            global_scheduler.current_strand = strand;
+
+            // Switch to strand
+            // When strand yields or completes, we'll return here
+            swapcontext(&global_scheduler.scheduler_context, &strand->context);
+
+            // We're back from the strand
+            // Check its state to see what happened
+            if (strand->state == STRAND_COMPLETED) {
+                // Strand finished - clean it up
+                StackCell* final_stack = strand->stack;
+                strand->stack = NULL;  // Don't free the stack, we'll return it
+
+                // If this is the last strand and it's the main one, return its stack
+                if (ready_queue_is_empty() && !global_scheduler.blocked_list && strand->id == 1) {
+                    StackCell* result = final_stack;
+                    strand_free(strand);
+                    global_scheduler.current_strand = NULL;
+                    return result;
+                }
+
+                // Otherwise just free it
+                free_stack(final_stack);
+                strand_free(strand);
+                global_scheduler.current_strand = NULL;
+            } else if (strand->state == STRAND_YIELDED) {
+                // Strand yielded - it already re-queued itself
+                // Nothing to do here, just continue to next iteration
+            } else if (strand->state == STRAND_BLOCKED_READ || strand->state == STRAND_BLOCKED_WRITE) {
+                // Strand blocked on I/O - it already added itself to blocked list and registered with kqueue
+                // Nothing to do here, continue to next iteration
+            } else {
+                // Unexpected state
+                runtime_error("scheduler_run: strand in unexpected state after context switch");
+            }
+        } else if (global_scheduler.blocked_list) {
+            // No ready strands, but we have blocked strands waiting for I/O
+            // Wait for I/O events with kqueue
+            struct kevent events[32];  // Handle up to 32 events at once
+            int nevents = kevent(global_scheduler.kqueue_fd, NULL, 0, events, 32, NULL);
+
+            if (nevents == -1) {
+                runtime_error("scheduler_run: kevent wait failed");
+            }
+
+            // Process events - move strands from blocked to ready
+            for (int i = 0; i < nevents; i++) {
+                Strand* strand = (Strand*)events[i].udata;
+                if (!strand) continue;
+
+                // Remove from blocked list
+                blocked_list_remove(strand);
+
+                // Mark as ready and add to ready queue
+                strand->state = STRAND_READY;
+                ready_queue_push(strand);
+            }
+        } else {
+            // No ready strands and no blocked strands - we're done
+            break;
+        }
+    }
+
+    // All strands completed
+    global_scheduler.current_strand = NULL;
     return NULL;
 }
 
@@ -265,19 +540,20 @@ StackCell* scheduler_run(void) {
 // ============================================================================
 
 /**
- * test_yield - Synthetic yield for testing (Phase 1)
+ * test_yield - Synthetic yield for testing
  *
- * In Phase 1, this is a no-op since we don't have true multitasking yet.
- * It will become functional in Phase 2 when I/O operations are integrated.
+ * This is a runtime function callable from Cem code to test the scheduler.
+ * It cooperatively yields execution to other strands.
  *
- * For now, it serves as a placeholder to ensure the runtime linkage works
- * and to allow testing programs to be written that will work once the
- * scheduler is fully implemented.
+ * Usage in Cem: `test_yield`
+ * Stack effect: ( -- )
  */
 StackCell* test_yield(StackCell* stack) {
-    // Phase 1: No-op yield
-    // Just return the stack unchanged
-    // In Phase 2, this will call strand_yield() when within an I/O operation
+    // If we're in a strand, yield to the scheduler
+    if (global_scheduler.current_strand) {
+        strand_yield();
+    }
+    // Otherwise, we're not in a strand context, so just return
     return stack;
 }
 
