@@ -2,15 +2,16 @@
  * Cem Runtime - Green Thread Scheduler Implementation
  *
  * This file implements the cooperative scheduler for Cem's green threads
- * (strands). The scheduler uses ucontext (makecontext/swapcontext) for
- * context switching and maintains a simple FIFO ready queue.
+ * (strands). The scheduler uses custom assembly context switching
+ * (cem_makecontext/cem_swapcontext) for fast, portable context switches.
  *
- * Phase 2a Implementation (current):
- * - Basic strand structure with ucontext_t
+ * Phase 2b Implementation (current):
+ * - Strand structure with cem_context_t
  * - FIFO ready queue
- * - Context switching via makecontext/swapcontext
+ * - Fast context switching via custom assembly (ARM64/x86-64)
+ * - Cleanup handler infrastructure for resource management
  * - 64KB C stacks per strand
- * - Target: ~10,000 concurrent strands
+ * - Target: ~10,000 concurrent strands (faster and leak-free)
  *
  * See docs/SCHEDULER_IMPLEMENTATION.md for roadmap.
  */
@@ -20,7 +21,6 @@
 #error "This scheduler requires kqueue support (macOS, FreeBSD, OpenBSD, or NetBSD). Linux support (epoll) is planned for Phase 2b."
 #endif
 
-#define _XOPEN_SOURCE 700
 #include "scheduler.h"
 #include <stdlib.h>
 #include <stdio.h>
@@ -76,13 +76,41 @@ static Strand* strand_alloc(uint64_t id, StackCell* initial_stack) {
     strand->state = STRAND_READY;
     strand->stack = initial_stack;
     strand->c_stack_size = STRAND_STACK_SIZE;
+    strand->cleanup_handlers = NULL;  // No cleanup handlers initially
     strand->blocked_fd = -1;  // Not blocked on any FD initially
     strand->next = NULL;
 
-    // Initialize context (but don't set entry function yet)
-    memset(&strand->context, 0, sizeof(ucontext_t));
+    // Initialize context (will be set up later with cem_makecontext)
+    memset(&strand->context, 0, sizeof(cem_context_t));
 
     return strand;
+}
+
+/**
+ * Run all cleanup handlers for a strand
+ *
+ * Handlers are called in LIFO order (most recently registered first).
+ * This ensures proper cleanup ordering (e.g., inner resources freed before outer).
+ */
+static void strand_run_cleanup_handlers(Strand* strand) {
+    if (!strand) return;
+
+    CleanupHandler* handler = strand->cleanup_handlers;
+    while (handler) {
+        CleanupHandler* next = handler->next;
+
+        // Call the cleanup function
+        if (handler->func) {
+            handler->func(handler->arg);
+        }
+
+        // Free the handler node itself
+        free(handler);
+
+        handler = next;
+    }
+
+    strand->cleanup_handlers = NULL;
 }
 
 /**
@@ -90,6 +118,9 @@ static Strand* strand_alloc(uint64_t id, StackCell* initial_stack) {
  */
 static void strand_free(Strand* strand) {
     if (!strand) return;
+
+    // Run cleanup handlers first (frees any resources allocated by the strand)
+    strand_run_cleanup_handlers(strand);
 
     // Free the Cem stack
     free_stack(strand->stack);
@@ -229,7 +260,7 @@ static void strand_entry_trampoline(void) {
 
     // Return control to scheduler
     // The scheduler will see the COMPLETED state and clean up
-    swapcontext(&strand->context, &global_scheduler.scheduler_context);
+    cem_swapcontext(&strand->context, &global_scheduler.scheduler_context);
 }
 
 /**
@@ -251,27 +282,82 @@ uint64_t strand_spawn(StackCell* (*entry_func)(StackCell*), StackCell* initial_s
     uint64_t id = global_scheduler.next_strand_id++;
     Strand* strand = strand_alloc(id, initial_stack);
 
-    // Initialize context
-    if (getcontext(&strand->context) == -1) {
-        strand_free(strand);
-        runtime_error("strand_spawn: getcontext failed");
-    }
-
     // Store entry function in the strand for trampoline to use
     strand->entry_func = entry_func;
 
-    // Set up context
-    strand->context.uc_stack.ss_sp = strand->c_stack;
-    strand->context.uc_stack.ss_size = strand->c_stack_size;
-    strand->context.uc_link = NULL;  // Don't auto-return, let trampoline handle it
-
-    // Create context (makecontext only accepts int args, so we use trampoline)
-    makecontext(&strand->context, strand_entry_trampoline, 0);
+    // Initialize context
+    // Set up the context to call strand_entry_trampoline when first switched to
+    cem_makecontext(&strand->context,
+                    strand->c_stack,
+                    strand->c_stack_size,
+                    strand_entry_trampoline,
+                    NULL);  // No return function needed (trampoline handles completion)
 
     // Add to ready queue
     ready_queue_push(strand);
 
     return id;
+}
+
+// ============================================================================
+// Cleanup Handlers
+// ============================================================================
+
+/**
+ * Register a cleanup handler for the current strand
+ *
+ * The handler will be called when the strand terminates.
+ * Handlers are stored in LIFO order (stack).
+ */
+void strand_push_cleanup(CleanupFunc func, void* arg) {
+    if (!scheduler_initialized) {
+        runtime_error("strand_push_cleanup: scheduler not initialized");
+    }
+
+    Strand* strand = global_scheduler.current_strand;
+    if (!strand) {
+        runtime_error("strand_push_cleanup: no current strand");
+    }
+
+    // Allocate cleanup handler node
+    CleanupHandler* handler = (CleanupHandler*)malloc(sizeof(CleanupHandler));
+    if (!handler) {
+        runtime_error("strand_push_cleanup: out of memory");
+    }
+
+    handler->func = func;
+    handler->arg = arg;
+    handler->next = strand->cleanup_handlers;
+
+    // Push onto LIFO list
+    strand->cleanup_handlers = handler;
+}
+
+/**
+ * Remove the most recently registered cleanup handler
+ *
+ * Called when the resource has been successfully released.
+ */
+void strand_pop_cleanup(void) {
+    if (!scheduler_initialized) {
+        runtime_error("strand_pop_cleanup: scheduler not initialized");
+    }
+
+    Strand* strand = global_scheduler.current_strand;
+    if (!strand) {
+        runtime_error("strand_pop_cleanup: no current strand");
+    }
+
+    CleanupHandler* handler = strand->cleanup_handlers;
+    if (!handler) {
+        runtime_error("strand_pop_cleanup: no cleanup handlers to pop");
+    }
+
+    // Pop from LIFO list
+    strand->cleanup_handlers = handler->next;
+
+    // Free the handler (but don't call the cleanup function)
+    free(handler);
 }
 
 // ============================================================================
@@ -304,7 +390,7 @@ void strand_yield(void) {
 
     // Switch back to scheduler context
     // The scheduler will resume us later when we're popped from the ready queue
-    swapcontext(&strand->context, &global_scheduler.scheduler_context);
+    cem_swapcontext(&strand->context, &global_scheduler.scheduler_context);
 
     // When we resume, execution continues here
     // The strand state will have been set back to RUNNING by the scheduler
@@ -385,7 +471,7 @@ void strand_block_on_read(int fd) {
     global_scheduler.current_strand = NULL;
 
     // Switch back to scheduler
-    swapcontext(&strand->context, &global_scheduler.scheduler_context);
+    cem_swapcontext(&strand->context, &global_scheduler.scheduler_context);
 
     // When we resume, clear the blocked_fd
     strand->blocked_fd = -1;
@@ -421,7 +507,7 @@ void strand_block_on_write(int fd) {
     global_scheduler.current_strand = NULL;
 
     // Switch back to scheduler
-    swapcontext(&strand->context, &global_scheduler.scheduler_context);
+    cem_swapcontext(&strand->context, &global_scheduler.scheduler_context);
 
     // When we resume, clear the blocked_fd
     strand->blocked_fd = -1;
@@ -449,11 +535,9 @@ StackCell* scheduler_run(void) {
         runtime_error("scheduler_run: scheduler not initialized");
     }
 
-    // Initialize scheduler context
-    // This is the "home base" that strands return to when they yield
-    if (getcontext(&global_scheduler.scheduler_context) == -1) {
-        runtime_error("scheduler_run: getcontext failed");
-    }
+    // Scheduler context is initialized implicitly by cem_swapcontext
+    // When strands yield, they save their context and restore the scheduler context
+    // The scheduler context gets populated on the first swap
 
     // Main scheduler loop
     while (true) {
@@ -471,7 +555,7 @@ StackCell* scheduler_run(void) {
 
             // Switch to strand
             // When strand yields or completes, we'll return here
-            swapcontext(&global_scheduler.scheduler_context, &strand->context);
+            cem_swapcontext(&global_scheduler.scheduler_context, &strand->context);
 
             // We're back from the strand
             // Check its state to see what happened
