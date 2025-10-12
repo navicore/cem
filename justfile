@@ -112,9 +112,11 @@ ci: fmt lint test
 build-runtime:
     @echo "Building C runtime library..."
     cd runtime && clang -Wall -Wextra -std=c11 -g -O2 -c stack.c -o stack.o
+    cd runtime && clang -Wall -Wextra -std=c11 -g -O2 -c context.c -o context.o
     cd runtime && clang -Wall -Wextra -std=c11 -g -O2 -c scheduler.c -o scheduler.o
     cd runtime && clang -Wall -Wextra -std=c11 -g -O2 -c io.c -o io.o
-    cd runtime && ar rcs libcem_runtime.a stack.o scheduler.o io.o
+    cd runtime && clang -g -O2 -c context_arm64.s -o context_arm64.o
+    cd runtime && ar rcs libcem_runtime.a stack.o context.o context_arm64.o scheduler.o io.o
     @echo "✅ Built runtime/libcem_runtime.a"
 
 # Build runtime test program
@@ -131,7 +133,34 @@ test-scheduler: build-runtime
     cd runtime && ./test_scheduler
     @echo "✅ Scheduler tests passed"
 
+# Test context switching implementation
+test-context: build-runtime
+    @echo "Building context switching tests..."
+    clang -Wall -Wextra -std=c11 -g tests/test_context.c -Lruntime -lcem_runtime -o tests/test_context
+    ./tests/test_context
+    @echo "✅ Context switching tests passed"
+
+# Test cleanup handler infrastructure
+test-cleanup: build-runtime
+    @echo "Building cleanup handler tests..."
+    clang -Wall -Wextra -std=c11 -g tests/test_cleanup.c -Lruntime -lcem_runtime -o tests/test_cleanup
+    ./tests/test_cleanup
+    @echo "✅ Cleanup handler tests passed"
+
+# Test I/O cleanup on strand termination
+test-io-cleanup: build-runtime
+    @echo "Building I/O cleanup tests..."
+    clang -Wall -Wextra -std=c11 -g tests/test_io_cleanup.c -Lruntime -lcem_runtime -o tests/test_io_cleanup
+    ./tests/test_io_cleanup
+    @echo "✅ I/O cleanup tests passed"
+
+# Run all runtime tests (Phase 2b)
+test-all-runtime: test-runtime test-scheduler test-context test-cleanup test-io-cleanup
+    @echo ""
+    @echo "🎉 All runtime tests passed!"
+
 # Clean runtime build artifacts
 clean-runtime:
-    rm -f runtime/*.o runtime/*.a runtime/test_runtime
+    rm -f runtime/*.o runtime/*.a runtime/test_runtime runtime/test_scheduler
+    rm -f tests/test_context tests/test_cleanup tests/test_io_cleanup
     @echo "Cleaned runtime artifacts"

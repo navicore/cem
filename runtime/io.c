@@ -45,9 +45,8 @@ static void ensure_nonblocking_io(void) {
  * Write a string to stdout with newline
  * Stack effect: ( str -- )
  *
- * KNOWN LIMITATION (Phase 2a): If a strand is terminated while blocked in this
- * function (e.g., during scheduler_shutdown), the malloc'd buffer will leak.
- * This will be fixed in Phase 2b with proper cleanup handlers.
+ * Phase 2b: Uses cleanup handlers to ensure buffer is freed even if
+ * strand is terminated while blocked.
  */
 StackCell* write_line(StackCell* stack) {
     ensure_nonblocking_io();
@@ -65,13 +64,15 @@ StackCell* write_line(StackCell* stack) {
     size_t total_len = str_len + 1;  // +1 for newline
 
     // Allocate buffer for string + newline
-    // TODO(Phase 2b): Add cleanup handler to free this buffer if strand is terminated while blocked
     char* buffer = malloc(total_len);
     if (!buffer) {
         runtime_error("write_line: out of memory");
     }
     memcpy(buffer, str, str_len);
     buffer[str_len] = '\n';
+
+    // Register cleanup handler to free buffer if strand terminates while blocked
+    strand_push_cleanup(free, buffer);
 
     // Free the string cell (we've copied the data)
     free_cell(stack);
@@ -90,16 +91,20 @@ StackCell* write_line(StackCell* stack) {
                 // When we resume, try again
             } else {
                 // Real error
+                strand_pop_cleanup();  // Remove cleanup handler before freeing manually
                 free(buffer);
                 runtime_error("write_line: write() failed");
             }
         } else {
             // n == 0, shouldn't happen for stdout
+            strand_pop_cleanup();  // Remove cleanup handler before freeing manually
             free(buffer);
             runtime_error("write_line: unexpected write() return 0");
         }
     }
 
+    // Success - remove cleanup handler and free buffer manually
+    strand_pop_cleanup();
     free(buffer);
     return rest;
 }
@@ -108,21 +113,22 @@ StackCell* write_line(StackCell* stack) {
  * Read a line from stdin
  * Stack effect: ( -- str )
  *
- * KNOWN LIMITATION (Phase 2a): If a strand is terminated while blocked in this
- * function (e.g., during scheduler_shutdown), the malloc'd buffer will leak.
- * This will be fixed in Phase 2b with proper cleanup handlers.
+ * Phase 2b: Uses cleanup handlers to ensure buffer is freed even if
+ * strand is terminated while blocked.
  */
 StackCell* read_line(StackCell* stack) {
     ensure_nonblocking_io();
 
     // Buffer for reading (we'll grow it if needed)
-    // TODO(Phase 2b): Add cleanup handler to free this buffer if strand is terminated while blocked
     size_t capacity = 128;
     size_t length = 0;
     char* buffer = malloc(capacity);
     if (!buffer) {
         runtime_error("read_line: out of memory");
     }
+
+    // Register cleanup handler to free buffer if strand terminates while blocked
+    strand_push_cleanup(free, buffer);
 
     // Read until we get a newline or EOF
     bool done = false;
@@ -142,10 +148,13 @@ StackCell* read_line(StackCell* stack) {
                     capacity *= 2;
                     char* new_buffer = realloc(buffer, capacity);
                     if (!new_buffer) {
+                        strand_pop_cleanup();  // Remove cleanup handler before freeing manually
                         free(buffer);
                         runtime_error("read_line: out of memory");
                     }
+                    // Update cleanup handler with new buffer pointer atomically
                     buffer = new_buffer;
+                    strand_update_cleanup_arg(buffer);
                 }
                 buffer[length++] = c;
             }
@@ -160,6 +169,7 @@ StackCell* read_line(StackCell* stack) {
                 // When we resume, try again
             } else {
                 // Real error
+                strand_pop_cleanup();  // Remove cleanup handler before freeing manually
                 free(buffer);
                 runtime_error("read_line: read() failed");
             }
@@ -171,18 +181,25 @@ StackCell* read_line(StackCell* stack) {
         capacity++;
         char* new_buffer = realloc(buffer, capacity);
         if (!new_buffer) {
+            strand_pop_cleanup();  // Remove cleanup handler before freeing manually
             free(buffer);
             runtime_error("read_line: out of memory");
         }
+        // Update cleanup handler with new buffer pointer atomically
         buffer = new_buffer;
+        strand_update_cleanup_arg(buffer);
     }
     buffer[length] = '\0';
 
-    // Create string cell
+    // Create string cell and transfer ownership of buffer
     StackCell* result = alloc_cell();
     result->tag = TAG_STRING;
-    result->value.s = buffer;  // Transfer ownership
+    result->value.s = buffer;  // Transfer ownership to string cell
     result->next = stack;
+
+    // Buffer ownership transferred to string cell, so remove cleanup handler
+    // (the string cell will be freed by normal stack cleanup)
+    strand_pop_cleanup();
 
     return result;
 }
