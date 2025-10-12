@@ -167,10 +167,22 @@ StackCell* read_line(StackCell* stack);   // Stack effect: ( -- str )
 
 ## Next Steps
 
-### Phase 2b: Assembly Context Switching
-- Replace ucontext with hand-written assembly for context switching
-- Reduce stack size from 64KB to 8KB
-- Target: ~80,000 concurrent strands
+### Phase 2b: Cleanup Handlers and Fast Context Switching
+**Goals**:
+1. **Fix memory leak**: Add cleanup handler infrastructure for proper resource management
+2. **Replace ucontext**: Integrate libaco for fast, portable context switching (~10-20ns vs ~500ns)
+3. **Reduce stack size**: 64KB → 8KB (enabled by faster context switching)
+4. **Multi-platform**: Support macOS (ARM64/x86-64) and Linux (ARM64/x86-64) via libaco
+
+**libaco Choice**:
+- Apache 2.0 licensed, vendorable
+- Supports x86-64, ARM64, ARM32, MIPS, RISC-V
+- Production-proven (Tencent, etc.)
+- Tiny codebase (~1000 lines) - easy to understand and maintain
+- 10x+ faster than ucontext
+- Future option: Replace with hand-written assembly as learning exercise
+
+**Target**: ~80,000 concurrent strands (10x improvement over Phase 2a)
 
 ### Phase 2c: Dynamic Stack Growth
 - Implement segmented stacks with guard pages
@@ -273,8 +285,11 @@ Phase 2a is **feature-complete** for its validation goals. The async I/O archite
 
 Phase 2b will address the memory leak as part of broader improvements:
 1. **Cleanup handlers**: Add infrastructure to register and run cleanup functions when strands terminate
-2. **Assembly context switching**: Replace ucontext with hand-written assembly for 10x faster context switches
-3. **Reduced stack size**: Shrink from 64KB to 8KB stacks (enabled by faster context switching)
-4. **Better lifecycle management**: Improve strand creation/destruction with proper resource cleanup
+2. **Fast context switching**: Replace ucontext with libaco (Apache 2.0) for 10-20x faster context switches
+3. **Multi-platform support**: libaco provides ARM64 + x86-64 for both macOS and Linux
+4. **Reduced stack size**: Shrink from 64KB to 8KB stacks (enabled by faster context switching)
+5. **Better lifecycle management**: Improve strand creation/destruction with proper resource cleanup
+
+**Why libaco**: Production-proven, Apache 2.0 licensed, supports all our target platforms (macOS/Linux on ARM64/x86-64), tiny codebase (~1000 lines) that's easy to vendor and understand. We can always replace with hand-written assembly later as a learning exercise.
 
 The Phase 2a implementation provides a solid foundation for Phase 2b's optimizations.
