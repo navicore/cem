@@ -65,6 +65,7 @@ StackCell* write_line(StackCell* stack) {
     size_t total_len = str_len + 1;  // +1 for newline
 
     // Allocate buffer for string + newline
+    // TODO(Phase 2b): Add cleanup handler to free this buffer if strand is terminated while blocked
     char* buffer = malloc(total_len);
     if (!buffer) {
         runtime_error("write_line: out of memory");
@@ -115,6 +116,7 @@ StackCell* read_line(StackCell* stack) {
     ensure_nonblocking_io();
 
     // Buffer for reading (we'll grow it if needed)
+    // TODO(Phase 2b): Add cleanup handler to free this buffer if strand is terminated while blocked
     size_t capacity = 128;
     size_t length = 0;
     char* buffer = malloc(capacity);

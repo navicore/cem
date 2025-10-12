@@ -15,6 +15,11 @@
  * See docs/SCHEDULER_IMPLEMENTATION.md for roadmap.
  */
 
+// Platform check - kqueue is only available on BSD-based systems
+#if !defined(__APPLE__) && !defined(__FreeBSD__) && !defined(__OpenBSD__) && !defined(__NetBSD__)
+#error "This scheduler requires kqueue support (macOS, FreeBSD, OpenBSD, or NetBSD). Linux support (epoll) is planned for Phase 2b."
+#endif
+
 #define _XOPEN_SOURCE 700
 #include "scheduler.h"
 #include <stdlib.h>

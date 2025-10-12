@@ -118,10 +118,15 @@ You typed: Final Line
    - Could be optimized with buffering
 
 5. **I/O Buffer Memory Leak**: If a strand is terminated while blocked in `write_line()` or `read_line()`, the malloc'd buffer will leak
-   - **Root Cause**: These functions allocate buffers as local variables. When `strand_block_on_read()` or `strand_block_on_write()` yields, the function is suspended. If the strand is freed (e.g., during `scheduler_shutdown()`), the C stack is freed but there's no cleanup handler to free the buffers.
-   - **Impact**: In normal operation, strands complete their I/O and buffers are freed. Leak only occurs if strands are forcibly terminated while blocked.
-   - **Mitigation**: Phase 2b will add cleanup handlers to properly free resources when strands are terminated.
-   - **Current Scope**: For Phase 2a, this is an acceptable limitation as our test programs complete normally.
+   - **Root Cause**: These functions allocate buffers as local variables on the C stack. When `strand_block_on_read()` or `strand_block_on_write()` yields via `swapcontext()`, the function is suspended with the buffer pointer as a local variable. If the strand is freed (e.g., during `scheduler_shutdown()` or normal program exit), the entire C stack is freed wholesale via `free(strand->c_stack)`, but there's no way to access the local `buffer` pointer to free the heap allocation it points to.
+   - **Impact**: **This affects all programs**, even those that exit normally. When `scheduler_shutdown()` is called, any strand blocked in I/O will leak its buffer. Our example programs leak on every run, though the leak is small (~100-1000 bytes) and the OS reclaims memory on process exit.
+   - **Why Not Fixed in Phase 2a**: Cleanup handlers are a separate architectural feature requiring:
+     - `CleanupHandler` linked list in `Strand` struct
+     - `strand_register_cleanup()` and `strand_run_cleanup()` functions
+     - Registration points in all I/O functions
+     - Proper cleanup ordering (LIFO)
+   - **Fix in Phase 2b**: Phase 2b will add cleanup handler infrastructure as part of improving strand lifecycle management. Cleanup handlers work identically with assembly context switching, so this is the natural place to add them.
+   - **Current Scope**: Phase 2a successfully validates the async I/O architecture (non-blocking I/O, yielding, scheduler integration). The memory leak is documented and will be fixed in Phase 2b. For validation purposes, this is acceptable.
 
 ## API Reference
 
@@ -238,13 +243,38 @@ All generated programs now work out-of-the-box with async I/O - no manual IR edi
 
 ## Conclusion
 
-Phase 2a successfully demonstrates:
+### What Phase 2a Accomplished
+
+Phase 2a successfully **validates the async I/O architecture**:
 - ✅ Cooperative green thread scheduling with context switching
-- ✅ Async I/O with automatic yielding
+- ✅ Async I/O with automatic yielding on EAGAIN/EWOULDBLOCK
 - ✅ Multiple concurrent strands performing I/O
 - ✅ Proper strand isolation (each executes its own function)
 - ✅ Event-driven I/O with kqueue integration
 - ✅ **Cem programs can perform I/O** - `write_line` and `read_line` work end-to-end
 - ✅ **Hello World and Echo programs compile and run correctly**
+- ✅ **Architecture validation complete** - The async I/O design is proven sound
 
-The implementation provides a solid foundation for future optimizations in Phase 2b (assembly context switching) and Phase 2c (dynamic stack growth).
+### Known Limitation: Memory Leak
+
+Phase 2a has a **documented memory leak** when strands are terminated while blocked in I/O (including normal program exit). This affects all programs using I/O, though the leak is small (~100-1000 bytes) and reclaimed by the OS on process exit.
+
+**This is acceptable for Phase 2a** because:
+1. The goal was to **validate the async I/O architecture**, not build production-ready resource management
+2. The architecture is proven - programs successfully perform async I/O with yielding
+3. The fix (cleanup handlers) is well-understood and will be added in Phase 2b
+4. Cleanup handlers are independent of context switching mechanism (work with both ucontext and assembly)
+
+### Phase 2a Status: ✅ Complete
+
+Phase 2a is **feature-complete** for its validation goals. The async I/O architecture works correctly - strands yield on blocking I/O, the scheduler multiplexes them efficiently, and programs can perform both read and write operations.
+
+### Next Steps: Phase 2b
+
+Phase 2b will address the memory leak as part of broader improvements:
+1. **Cleanup handlers**: Add infrastructure to register and run cleanup functions when strands terminate
+2. **Assembly context switching**: Replace ucontext with hand-written assembly for 10x faster context switches
+3. **Reduced stack size**: Shrink from 64KB to 8KB stacks (enabled by faster context switching)
+4. **Better lifecycle management**: Improve strand creation/destruction with proper resource cleanup
+
+The Phase 2a implementation provides a solid foundation for Phase 2b's optimizations.
