@@ -73,9 +73,56 @@ void cem_makecontext(cem_context_t* ctx,
     (void)return_func;  // Unused - see safety note above
 
 #elif defined(CEM_ARCH_X86_64)
-    // x86-64 context switching is not yet implemented
-    // TODO: Implement x86-64 assembly (similar to context_arm64.s)
-    #error "x86-64 context switching is not yet implemented. Only ARM64 macOS is currently supported."
+    // x86-64: Stack grows downward (from high address to low address)
+    // stack_base is the LOW address of the allocated memory
+    // stack_top (high address) is where the stack pointer starts
+    uintptr_t stack_top = (uintptr_t)stack_base + stack_size;
+
+    // Align to 16 bytes (required by x86-64 ABI)
+    stack_top &= ~15ULL;
+
+    // Push the function address onto the stack
+    // This will be the return address that 'ret' will jump to
+    stack_top -= sizeof(void*);
+    *(void**)stack_top = (void*)func;
+
+    // Note: Stack is now misaligned by 8 bytes (as expected after 'call')
+    // This matches what swapcontext expects
+
+    ctx->rsp = stack_top;
+    
+    // Set frame pointer to stack top (no frame yet)
+    ctx->rbp = stack_top;
+    
+    // Initialize MXCSR to default value (0x1F80)
+    // This enables all floating point exceptions masked
+    ctx->mxcsr = 0x1F80;
+    
+    // Zero out other registers
+    ctx->rbx = 0;
+    ctx->r12 = 0;
+    ctx->r13 = 0;
+    ctx->r14 = 0;
+    ctx->r15 = 0;
+    
+    // NOTE: return_func is intentionally unused (same reasoning as ARM64)
+    //
+    // SAFETY: This is safe because:
+    // 1. All strands are created via strand_spawn() in scheduler.c
+    // 2. strand_spawn() ALWAYS uses strand_entry_trampoline as the entry point
+    // 3. The trampoline calls the actual strand function and handles returns
+    // 4. When a strand function returns, the trampoline:
+    //    - Sets strand->state = STRAND_COMPLETED
+    //    - Swaps back to scheduler_context
+    //    - The scheduler cleans up the strand
+    //
+    // THREAD-SAFETY NOTE for future work-stealing:
+    // This initialization is NOT thread-safe by itself, but that's fine because:
+    // - cem_makecontext() is only called during strand_spawn()
+    // - strand_spawn() must be synchronized by the scheduler
+    // - Once initialized, the context can be safely migrated between threads
+    // - The context contains no thread-local state (no TLS pointers, etc.)
+    (void)return_func;  // Unused - see safety note above
 
 #endif
 }

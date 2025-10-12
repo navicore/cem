@@ -5,16 +5,17 @@
  * It replaces the deprecated ucontext API with custom assembly implementations.
  *
  * Supported Platforms:
- * - macOS ARM64 (Apple Silicon) - IMPLEMENTED
- * - macOS x86-64 (Intel)        - TODO
- * - Linux ARM64                 - TODO
- * - Linux x86-64                - TODO
+ * - macOS ARM64 (Apple Silicon) - IMPLEMENTED ✅
+ * - Linux x86-64 (Intel/AMD)    - IMPLEMENTED ✅
+ * - macOS x86-64 (Intel)        - TODO (trivial port from Linux x86-64)
+ * - Linux ARM64                 - TODO (trivial port from macOS ARM64)
  *
  * Design Philosophy:
  * - Single unified API across all platforms
  * - Platform-specific implementations via conditional compilation
  * - Minimal overhead (~10-20ns context switch vs ~500ns for ucontext)
  * - Callee-saved registers only (caller-saved are preserved by C ABI)
+ * - Thread-safe design ready for future work-stealing scheduler
  */
 
 #ifndef CEM_RUNTIME_CONTEXT_H
@@ -48,8 +49,10 @@
 // Check implementation status
 #if defined(CEM_ARCH_ARM64) && defined(CEM_OS_MACOS)
     #define CEM_CONTEXT_IMPLEMENTED
+#elif defined(CEM_ARCH_X86_64) && defined(CEM_OS_LINUX)
+    #define CEM_CONTEXT_IMPLEMENTED
 #else
-    #error "Context switching not yet implemented for this platform. Currently implemented: ARM64 macOS"
+    #error "Context switching not yet implemented for this platform. Currently implemented: ARM64 macOS, x86-64 Linux"
 #endif
 
 // ============================================================================
