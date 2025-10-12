@@ -155,8 +155,15 @@ test-io-cleanup: build-runtime
     ./tests/test_io_cleanup
     @echo "✅ I/O cleanup tests passed"
 
-# Run all runtime tests (Phase 2b)
-test-all-runtime: test-runtime test-scheduler test-context test-cleanup test-io-cleanup
+# Test dynamic stack growth (Phase 3)
+test-stack-growth: build-runtime
+    @echo "Building stack growth stress tests..."
+    clang -Wall -Wextra -std=c11 -g tests/test_stack_growth.c -Lruntime -lcem_runtime -o tests/test_stack_growth
+    ./tests/test_stack_growth
+    @echo "✅ Stack growth stress tests passed"
+
+# Run all runtime tests (Phase 3)
+test-all-runtime: test-runtime test-scheduler test-context test-cleanup test-io-cleanup test-stack-growth
     @echo ""
     @echo "🎉 All runtime tests passed!"
 

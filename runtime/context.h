@@ -140,6 +140,16 @@ typedef struct {
 #define CEM_MIN_FREE_STACK 8192
 
 /**
+ * Stack usage threshold for proactive growth (Phase 3)
+ *
+ * If stack usage exceeds this percentage of total size, growth is triggered
+ * at the next checkpoint even if free space is above CEM_MIN_FREE_STACK.
+ *
+ * 75% provides a good balance between memory efficiency and preventing overflow.
+ */
+#define CEM_STACK_GROWTH_THRESHOLD_PERCENT 75
+
+/**
  * Maximum stack size (safety limit)
  *
  * Stacks will not grow beyond this size. If a strand needs more,

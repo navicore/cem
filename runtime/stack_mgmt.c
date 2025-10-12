@@ -355,7 +355,7 @@ bool stack_check_and_grow(struct Strand* strand, uintptr_t current_sp) {
 
     // Hybrid growth strategy:
     // 1. Grow if free space < MIN_FREE_STACK (8KB), OR
-    // 2. Grow if used > 75% of total
+    // 2. Grow if used > CEM_STACK_GROWTH_THRESHOLD_PERCENT of total
 
     bool need_growth = false;
     const char* reason = NULL;
@@ -363,9 +363,9 @@ bool stack_check_and_grow(struct Strand* strand, uintptr_t current_sp) {
     if (free < CEM_MIN_FREE_STACK) {
         need_growth = true;
         reason = "free space below minimum";
-    } else if (used > (meta->usable_size * 3 / 4)) {
+    } else if (used > (meta->usable_size * CEM_STACK_GROWTH_THRESHOLD_PERCENT / 100)) {
         need_growth = true;
-        reason = "usage above 75%";
+        reason = "usage above threshold";
     }
 
     if (!need_growth) {
