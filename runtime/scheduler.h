@@ -147,19 +147,25 @@ typedef struct Strand {
  * - Current strand: The currently executing strand
  * - Next strand ID: Counter for generating unique IDs
  * - Scheduler context: The main scheduler's execution context
- * - kqueue fd: BSD kqueue for async I/O event notifications (macOS/FreeBSD)
+ * - I/O multiplexing: kqueue (BSD/macOS) or epoll (Linux) for async I/O
  *
  * Note: This is a single-threaded scheduler. All fields are accessed
  * from a single thread, so no locks are needed.
  */
-typedef struct {
+typedef struct Scheduler {
     Strand* ready_queue_head;   // Head of ready queue (FIFO)
     Strand* ready_queue_tail;   // Tail of ready queue (FIFO)
     Strand* blocked_list;       // Linked list of strands blocked on I/O
     Strand* current_strand;     // Currently executing strand
     uint64_t next_strand_id;    // Counter for strand IDs
     cem_context_t scheduler_context; // Scheduler's main context
+    
+    // Platform-specific I/O multiplexing
+#if defined(__linux__)
+    int epoll_fd;               // epoll descriptor for async I/O (-1 if not initialized)
+#else
     int kqueue_fd;              // kqueue descriptor for async I/O (-1 if not initialized)
+#endif
 } Scheduler;
 
 // ============================================================================
