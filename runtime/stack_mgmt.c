@@ -5,27 +5,59 @@
  * and emergency guard page overflow detection.
  */
 
+// Enable MAP_ANONYMOUS and other POSIX extensions on Linux
+#if defined(__linux__)
+#define _GNU_SOURCE
+#endif
+
 #include "scheduler.h"  // Must be first to get full Scheduler definition
 #include "stack_mgmt.h"
 #include <sys/mman.h>
-#include <signal.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
 #include <stdint.h>  // For SIZE_MAX
+#include <sys/types.h>  // For ssize_t
+
+// Signal handling - we need to avoid including signal.h which pulls in unistd.h
+// Forward declare the types and functions we need
+typedef struct {
+    int si_signo;
+    int si_errno;
+    int si_code;
+    void *si_addr;
+    // ... other fields we don't use
+} siginfo_t;
+
+struct sigaction {
+    void (*sa_sigaction)(int, siginfo_t *, void *);
+    unsigned long sa_flags;
+    void (*sa_restorer)(void);
+    unsigned char sa_mask[128];  // Large enough for sigset_t
+};
+
+#define SA_SIGINFO 4
+#define SIGSEGV 11
+#define SIG_DFL ((void (*)(int))0)
+
+extern int sigaction(int sig, const struct sigaction *act, struct sigaction *oldact);
+extern int sigemptyset(void *set);  // Take void* to avoid type mismatch
+extern void (*signal(int sig, void (*func)(int)))(int);
+extern int raise(int sig);
 
 // Forward declare sysconf to avoid including unistd.h
 // (unistd.h conflicts with stack.h's dup() function)
 extern long sysconf(int);
 
-// Platform-specific _SC_PAGESIZE values
-// We try multiple common values and use runtime detection with fallback
-// This is more robust than hardcoding OS-specific constants that may change
+// Platform-specific constants
 #if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
     // BSD-based systems typically use 29, but we'll try multiple values
     static const int SC_PAGESIZE_CANDIDATES[] = {29, 30, -1};
     #define DEFAULT_PAGE_SIZE 16384  // 16KB on Apple Silicon, 4KB on Intel
+    #ifndef MAP_ANONYMOUS
+        #define MAP_ANONYMOUS MAP_ANON  // BSD uses MAP_ANON
+    #endif
 #elif defined(__linux__)
     // Linux typically uses 30, but we'll try multiple values
     static const int SC_PAGESIZE_CANDIDATES[] = {30, 29, -1};
@@ -297,7 +329,7 @@ bool stack_grow(struct Strand* strand, size_t new_usable_size, bool in_signal_ha
     }
 
     // Calculate current stack usage from SP
-    uintptr_t old_sp = strand->context.sp;
+    uintptr_t old_sp = CEM_CONTEXT_GET_SP(&strand->context);
     uintptr_t old_stack_top = (uintptr_t)old_meta->usable_base + old_meta->usable_size;
     size_t used_bytes = (size_t)(old_stack_top - old_sp);
 

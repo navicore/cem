@@ -119,6 +119,21 @@ typedef struct {
 #endif
 
 // ============================================================================
+// Context Helper Macros
+// ============================================================================
+
+/**
+ * Get stack pointer from context (architecture-independent)
+ *
+ * ARM64 uses 'sp', x86-64 uses 'rsp'. This macro provides a uniform interface.
+ */
+#ifdef CEM_ARCH_ARM64
+    #define CEM_CONTEXT_GET_SP(ctx) ((ctx)->sp)
+#elif defined(CEM_ARCH_X86_64)
+    #define CEM_CONTEXT_GET_SP(ctx) ((ctx)->rsp)
+#endif
+
+// ============================================================================
 // Configuration Constants
 // ============================================================================
 

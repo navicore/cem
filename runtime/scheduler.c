@@ -17,21 +17,29 @@
  * See docs/SCHEDULER_IMPLEMENTATION.md for roadmap.
  */
 
-// Platform check - kqueue is only available on BSD-based systems
-#if !defined(__APPLE__) && !defined(__FreeBSD__) && !defined(__OpenBSD__) && !defined(__NetBSD__)
-#error "This scheduler requires kqueue support (macOS, FreeBSD, OpenBSD, or NetBSD). Linux support (epoll) is planned for Phase 2b."
+// Platform detection for I/O multiplexing
+#if defined(__linux__)
+    #define USE_EPOLL
+    #include <sys/epoll.h>
+#elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+    #define USE_KQUEUE
+    #include <sys/event.h>  // kqueue, kevent
+    #include <sys/time.h>   // struct timespec
+#else
+    #error "Unsupported platform. Requires kqueue (BSD/macOS) or epoll (Linux) support."
 #endif
 
 #include "scheduler.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <sys/event.h>  // kqueue, kevent
-#include <sys/time.h>   // struct timespec
 
 // Forward declare close() to avoid including unistd.h (which conflicts with stack.h's dup())
 extern int close(int);
+
+#ifdef USE_KQUEUE
 extern int kqueue(void);
+#endif
 
 // ============================================================================
 // Configuration Constants
@@ -190,11 +198,18 @@ void scheduler_init(void) {
     memset(&global_scheduler, 0, sizeof(Scheduler));
     global_scheduler.next_strand_id = 1;  // Start IDs at 1 (0 reserved for main)
 
-    // Initialize kqueue for async I/O (macOS/FreeBSD)
+    // Initialize I/O multiplexing
+#ifdef USE_KQUEUE
     global_scheduler.kqueue_fd = kqueue();
     if (global_scheduler.kqueue_fd == -1) {
         runtime_error("scheduler_init: kqueue() failed");
     }
+#elif defined(USE_EPOLL)
+    global_scheduler.epoll_fd = epoll_create1(0);
+    if (global_scheduler.epoll_fd == -1) {
+        runtime_error("scheduler_init: epoll_create1() failed");
+    }
+#endif
 
     // Initialize dynamic stack management (Phase 3)
     // Set up SIGSEGV handler for emergency guard page overflow
@@ -228,11 +243,18 @@ void scheduler_shutdown(void) {
         global_scheduler.current_strand = NULL;
     }
 
-    // Close kqueue
+    // Close I/O multiplexing descriptor
+#ifdef USE_KQUEUE
     if (global_scheduler.kqueue_fd != -1) {
         close(global_scheduler.kqueue_fd);
         global_scheduler.kqueue_fd = -1;
     }
+#elif defined(USE_EPOLL)
+    if (global_scheduler.epoll_fd != -1) {
+        close(global_scheduler.epoll_fd);
+        global_scheduler.epoll_fd = -1;
+    }
+#endif
 
     scheduler_initialized = false;
 }
@@ -497,12 +519,21 @@ void strand_block_on_read(int fd) {
     strand->state = STRAND_BLOCKED_READ;
     strand->blocked_fd = fd;
 
-    // Register for read events with kqueue
+    // Register for read events
+#ifdef USE_KQUEUE
     struct kevent ev;
     EV_SET(&ev, fd, EVFILT_READ, EV_ADD | EV_ONESHOT, 0, 0, strand);
     if (kevent(global_scheduler.kqueue_fd, &ev, 1, NULL, 0, NULL) == -1) {
         runtime_error("strand_block_on_read: kevent registration failed");
     }
+#elif defined(USE_EPOLL)
+    struct epoll_event ev;
+    ev.events = EPOLLIN | EPOLLET | EPOLLONESHOT;  // Edge-triggered, one-shot like kqueue
+    ev.data.ptr = strand;
+    if (epoll_ctl(global_scheduler.epoll_fd, EPOLL_CTL_ADD, fd, &ev) == -1) {
+        runtime_error("strand_block_on_read: epoll_ctl failed");
+    }
+#endif
 
     // Add to blocked list
     blocked_list_add(strand);
@@ -533,12 +564,21 @@ void strand_block_on_write(int fd) {
     strand->state = STRAND_BLOCKED_WRITE;
     strand->blocked_fd = fd;
 
-    // Register for write events with kqueue
+    // Register for write events
+#ifdef USE_KQUEUE
     struct kevent ev;
     EV_SET(&ev, fd, EVFILT_WRITE, EV_ADD | EV_ONESHOT, 0, 0, strand);
     if (kevent(global_scheduler.kqueue_fd, &ev, 1, NULL, 0, NULL) == -1) {
         runtime_error("strand_block_on_write: kevent registration failed");
     }
+#elif defined(USE_EPOLL)
+    struct epoll_event ev;
+    ev.events = EPOLLOUT | EPOLLET | EPOLLONESHOT;  // Edge-triggered, one-shot like kqueue
+    ev.data.ptr = strand;
+    if (epoll_ctl(global_scheduler.epoll_fd, EPOLL_CTL_ADD, fd, &ev) == -1) {
+        runtime_error("strand_block_on_write: epoll_ctl failed");
+    }
+#endif
 
     // Add to blocked list
     blocked_list_add(strand);
@@ -594,7 +634,7 @@ StackCell* scheduler_run(void) {
             // Phase 3: Checkpoint-based stack growth check
             // Before switching to the strand, check if its stack needs to grow
             // This is the primary growth mechanism (emergency guard page is backup)
-            stack_check_and_grow(strand, strand->context.sp);
+            stack_check_and_grow(strand, CEM_CONTEXT_GET_SP(&strand->context));
 
             // Switch to strand
             // When strand yields or completes, we'll return here
@@ -631,7 +671,8 @@ StackCell* scheduler_run(void) {
             }
         } else if (global_scheduler.blocked_list) {
             // No ready strands, but we have blocked strands waiting for I/O
-            // Wait for I/O events with kqueue
+            // Wait for I/O events
+#ifdef USE_KQUEUE
             struct kevent events[32];  // Handle up to 32 events at once
             int nevents = kevent(global_scheduler.kqueue_fd, NULL, 0, events, 32, NULL);
 
@@ -651,6 +692,30 @@ StackCell* scheduler_run(void) {
                 strand->state = STRAND_READY;
                 ready_queue_push(strand);
             }
+#elif defined(USE_EPOLL)
+            struct epoll_event events[32];  // Handle up to 32 events at once
+            int nevents = epoll_wait(global_scheduler.epoll_fd, events, 32, -1);  // -1 = block indefinitely
+
+            if (nevents == -1) {
+                runtime_error("scheduler_run: epoll_wait failed");
+            }
+
+            // Process events - move strands from blocked to ready
+            for (int i = 0; i < nevents; i++) {
+                Strand* strand = (Strand*)events[i].data.ptr;
+                if (!strand) continue;
+
+                // Remove from blocked list
+                blocked_list_remove(strand);
+
+                // Remove from epoll (one-shot behavior - already removed automatically by EPOLLONESHOT)
+                // No need to call epoll_ctl with EPOLL_CTL_DEL - EPOLLONESHOT does it for us
+
+                // Mark as ready and add to ready queue
+                strand->state = STRAND_READY;
+                ready_queue_push(strand);
+            }
+#endif
         } else {
             // No ready strands and no blocked strands - we're done
             break;
