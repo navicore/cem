@@ -135,9 +135,14 @@ typedef struct {
  * the stack will be grown proactively. This prevents sudden allocations
  * (large local arrays, deep recursion) from overflowing.
  *
- * 8KB provides headroom for most function calls with local variables.
+ * 2KB provides headroom for typical function calls with local variables.
+ * This must be LESS than CEM_INITIAL_STACK_SIZE to avoid immediate growth.
+ *
+ * Note: The 75% usage threshold (CEM_STACK_GROWTH_THRESHOLD_PERCENT) provides
+ * additional protection, so this threshold is primarily for catching sudden
+ * large allocations (e.g., VLAs, large structs on stack).
  */
-#define CEM_MIN_FREE_STACK 8192
+#define CEM_MIN_FREE_STACK 2048
 
 /**
  * Stack usage threshold for proactive growth (Phase 3)
