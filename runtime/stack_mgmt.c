@@ -143,7 +143,11 @@ void stack_free(StackMetadata* meta) {
     }
 
     if (meta->base) {
-        munmap(meta->base, meta->total_size);
+        if (munmap(meta->base, meta->total_size) != 0) {
+            fprintf(stderr, "WARNING: munmap failed during stack_free (addr=%p, size=%zu)\n",
+                    meta->base, meta->total_size);
+            // Continue anyway - we can't do much about it
+        }
     }
 
     free(meta);
@@ -275,50 +279,42 @@ bool stack_grow(struct Strand* strand, size_t new_usable_size) {
         // No adjustment needed for x30
 
     #elif defined(CEM_ARCH_X86_64)
+        // x86-64 IMPLEMENTATION INCOMPLETE - Return address adjustment not yet implemented
+        //
+        // CRITICAL LIMITATION: On x86-64, return addresses are stored ON THE STACK
+        // (not in registers like ARM64's x30). When we memcpy the stack to a new
+        // location, these return addresses become invalid and will crash when functions
+        // try to return.
+        //
+        // REQUIRED FOR FULL x86-64 SUPPORT:
+        // 1. Walk the stack frame chain using rbp (frame pointer)
+        // 2. For each frame, adjust the return address by (new_stack_top - old_stack_top)
+        // 3. Handle cases where rbp chain is broken (optimized code, leaf functions)
+        //
+        // CURRENT WORKAROUND: Checkpoint-based growth catches most cases BEFORE
+        // return addresses are on the stack. This works for simple strands but
+        // will fail for deep call stacks or recursive functions.
+        //
+        // TODO: Implement full stack frame walking and return address adjustment
+        // See Go runtime's adjustframe() for reference implementation.
+
         // Update stack pointer
         strand->context.rsp = new_sp;
 
-        // Update frame pointer (rbp)
+        // Update frame pointer (rbp) - but only if it points into the old stack
         if (strand->context.rbp >= (uintptr_t)old_meta->usable_base &&
             strand->context.rbp <= old_stack_top) {
             uintptr_t offset_from_top = old_stack_top - strand->context.rbp;
             strand->context.rbp = new_stack_top - offset_from_top;
         }
 
-        // RUNTIME WARNING for x86-64 limitation
-        static bool x86_64_warning_shown = false;
-        if (!x86_64_warning_shown) {
-            fprintf(stderr, "\n");
-            fprintf(stderr, "WARNING: x86-64 stack growth detected!\n");
-            fprintf(stderr, "  x86-64 return address adjustment is NOT implemented.\n");
-            fprintf(stderr, "  If this strand has return addresses on its stack,\n");
-            fprintf(stderr, "  it will likely crash after growth.\n");
-            fprintf(stderr, "  This warning will only be shown once.\n");
-            fprintf(stderr, "\n");
-            x86_64_warning_shown = true;
-        }
+        // WARNING: We are NOT adjusting return addresses on the stack!
+        // This will likely cause crashes if the strand has active call frames.
+        fprintf(stderr, "WARNING: x86-64 stack growth is INCOMPLETE and may crash\n");
+        fprintf(stderr, "  Return addresses on stack are not adjusted!\n");
 
-        // LIMITATION: x86-64 return addresses need adjustment
-        //
-        // Unlike ARM64 (which stores return addresses in LR register), x86-64 stores
-        // return addresses directly on the stack. When we copy the stack to a new
-        // location, these return addresses become invalid pointers into the old stack.
-        //
-        // To fix this properly, we would need to:
-        // 1. Walk the stack frames (following rbp chain)
-        // 2. For each frame, find the return address
-        // 3. Adjust it by the stack relocation offset
-        //
-        // This is complex and error-prone. For now, we rely on the checkpoint-based
-        // growth strategy catching stack growth BEFORE any function calls push return
-        // addresses onto the stack. This works because:
-        // - Checkpoints run at every context switch (before strand executes)
-        // - Growth happens proactively (8KB free space minimum)
-        // - Emergency guard page is a safety net (should never be hit)
-        //
-        // FUTURE: If x86-64 support becomes critical and guard pages are being hit,
-        // implement proper return address adjustment via stack frame walking.
-
+    #else
+        #error "Unsupported architecture for dynamic stack growth"
     #endif
 
     // Save values we need before freeing old_meta

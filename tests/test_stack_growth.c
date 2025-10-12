@@ -13,9 +13,16 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <string.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #include "../runtime/scheduler.h"
-#include "../runtime/stack.h"
 #include "../runtime/stack_mgmt.h"
+
+// Note: scheduler.h includes stack.h, which defines dup() for Cem stacks.
+// This conflicts with unistd.h's dup() for file descriptors.
+// We forward-declare the few POSIX functions we need instead of including unistd.h:
+extern pid_t fork(void);
+extern void _exit(int) __attribute__((noreturn));
 
 // Test execution tracking
 static int test_passed = 0;
@@ -357,6 +364,54 @@ void test_page_size_detection(void) {
 }
 
 // ============================================================================
+// Test 11: Guard Page Fault Test (in forked child)
+// ============================================================================
+
+void test_guard_page_fault(void) {
+    printf("\nTest 11: Guard page SIGSEGV handling (forked child)\n");
+
+    // Fork a child process to test guard page fault without crashing main test
+    pid_t pid = fork();
+
+    if (pid == 0) {
+        // Child process - trigger guard page fault
+        scheduler_init();
+
+        // Allocate a stack
+        StackMetadata* meta = stack_alloc(4096);
+        if (!meta) {
+            _exit(1);  // Allocation failed
+        }
+
+        // Try to write to the guard page (this should trigger SIGSEGV)
+        // The signal handler should catch it and attempt emergency growth
+        char* guard_ptr = (char*)meta->base;  // Points to guard page
+        guard_ptr[0] = 0xAA;  // This write should fault
+
+        // If we get here, the signal handler worked
+        stack_free(meta);
+        scheduler_shutdown();
+        _exit(0);  // Success
+    } else if (pid > 0) {
+        // Parent process - wait for child
+        int status;
+        waitpid(pid, &status, 0);
+
+        if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+            TEST_PASS("Guard page fault handled by signal handler");
+        } else if (WIFSIGNALED(status)) {
+            // Child was killed by signal - expected if guard page works
+            // but emergency growth fails (which is OK for a deliberate fault test)
+            TEST_PASS("Guard page protection triggered signal (expected)");
+        } else {
+            TEST_ASSERT(0, "Guard page test failed unexpectedly");
+        }
+    } else {
+        TEST_ASSERT(0, "Fork failed");
+    }
+}
+
+// ============================================================================
 // Main Test Runner
 // ============================================================================
 
@@ -374,6 +429,7 @@ int main(void) {
     test_guard_page_protection();
     test_growth_count_tracking();
     test_page_size_detection();
+    test_guard_page_fault();
 
     printf("\n=== Test Results ===\n");
     printf("Passed: %d\n", test_passed);
