@@ -120,12 +120,44 @@ typedef struct {
 // ============================================================================
 
 /**
- * Minimum stack size for safe execution
+ * Minimum stack size for safe execution (Phase 3: Dynamic Growth)
  *
- * 4KB is sufficient for most strand operations while preventing
- * dangerously small stacks that could overflow immediately.
+ * 4KB initial allocation per strand provides enough space for most
+ * operations while keeping memory overhead low. Stacks grow dynamically
+ * by doubling when needed.
  */
-#define CEM_MIN_STACK_SIZE 4096
+#define CEM_INITIAL_STACK_SIZE 4096
+
+/**
+ * Minimum free stack space to maintain (Phase 3)
+ *
+ * If free space falls below this threshold at a context switch checkpoint,
+ * the stack will be grown proactively. This prevents sudden allocations
+ * (large local arrays, deep recursion) from overflowing.
+ *
+ * 8KB provides headroom for most function calls with local variables.
+ */
+#define CEM_MIN_FREE_STACK 8192
+
+/**
+ * Maximum stack size (safety limit)
+ *
+ * Stacks will not grow beyond this size. If a strand needs more,
+ * it will trigger a runtime error. This prevents runaway stack growth
+ * from consuming all system memory.
+ *
+ * 1MB is generous for most strand operations while protecting against
+ * pathological cases (infinite recursion, etc.)
+ */
+#define CEM_MAX_STACK_SIZE (1024 * 1024)
+
+/**
+ * Legacy compatibility constant
+ *
+ * CEM_MIN_STACK_SIZE is now an alias for CEM_INITIAL_STACK_SIZE.
+ * Kept for backward compatibility with Phase 2b code.
+ */
+#define CEM_MIN_STACK_SIZE CEM_INITIAL_STACK_SIZE
 
 // ============================================================================
 // Context Switching API
