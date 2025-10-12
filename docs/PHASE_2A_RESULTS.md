@@ -186,6 +186,50 @@ StackCell* read_line(StackCell* stack);   // Stack effect: ( -- str )
 - `tests/test_io_echo.c` - Echo program with read and write
 - `docs/PHASE_2A_RESULTS.md` - This document
 
+## Cem Language Integration
+
+### I/O Words
+
+The following I/O operations are now available in Cem programs:
+
+- `write_line` - Stack effect: `( String -- )` - Write string to stdout with newline
+- `read_line` - Stack effect: `( -- String )` - Read line from stdin
+
+### Working Examples
+
+#### Hello World (`examples/hello_io.cem`)
+```cem
+: main ( -- )
+  "Hello, World!" write_line ;
+```
+
+Compiles to executable that prints "Hello, World!"
+
+#### Echo Program (`examples/echo.cem`)
+```cem
+: echo ( -- )
+  read_line write_line ;
+```
+
+Compiles to executable that reads a line and echoes it back.
+
+### Codegen Fixes
+
+Fixed critical bugs in the LLVM IR generator:
+1. **Temp variable numbering** - Variables now numbered in order of use (%0, %1, %2)
+2. **Name collision** - Cem `main` word renamed to `cem_main` to avoid collision with C `main()`
+
+### Automatic Scheduler Integration
+
+The code generator now automatically handles scheduler setup:
+- ✅ Emits `scheduler_init()` at program start
+- ✅ Spawns entry word as a strand via `strand_spawn()`
+- ✅ Runs scheduler with `scheduler_run()`
+- ✅ Cleans up with `scheduler_shutdown()`
+- ✅ Includes debug output with `print_stack()` for final stack state
+
+All generated programs now work out-of-the-box with async I/O - no manual IR editing required.
+
 ## Conclusion
 
 Phase 2a successfully demonstrates:
@@ -194,5 +238,7 @@ Phase 2a successfully demonstrates:
 - ✅ Multiple concurrent strands performing I/O
 - ✅ Proper strand isolation (each executes its own function)
 - ✅ Event-driven I/O with kqueue integration
+- ✅ **Cem programs can perform I/O** - `write_line` and `read_line` work end-to-end
+- ✅ **Hello World and Echo programs compile and run correctly**
 
 The implementation provides a solid foundation for future optimizations in Phase 2b (assembly context switching) and Phase 2c (dynamic stack growth).
