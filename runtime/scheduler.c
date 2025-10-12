@@ -48,6 +48,10 @@ extern int kqueue(void);
 // Phase 3: Dynamic stacks - configuration moved to context.h
 // (CEM_INITIAL_STACK_SIZE, CEM_MIN_FREE_STACK, CEM_MAX_STACK_SIZE)
 
+// Maximum number of I/O events to process per event loop iteration
+// Larger values process more events per syscall but increase latency
+#define MAX_IO_EVENTS 32
+
 // ============================================================================
 // Global Scheduler State
 // ============================================================================
@@ -207,7 +211,8 @@ void scheduler_init(void) {
 #elif defined(USE_EPOLL)
     global_scheduler.epoll_fd = epoll_create1(0);
     if (global_scheduler.epoll_fd == -1) {
-        runtime_error("scheduler_init: epoll_create1() failed");
+        perror("scheduler_init: epoll_create1() failed");
+        runtime_error("scheduler_init: Failed to create epoll instance");
     }
 #endif
 
@@ -531,7 +536,8 @@ void strand_block_on_read(int fd) {
     ev.events = EPOLLIN | EPOLLET | EPOLLONESHOT;  // Edge-triggered, one-shot like kqueue
     ev.data.ptr = strand;
     if (epoll_ctl(global_scheduler.epoll_fd, EPOLL_CTL_ADD, fd, &ev) == -1) {
-        runtime_error("strand_block_on_read: epoll_ctl failed");
+        perror("strand_block_on_read: epoll_ctl failed");
+        runtime_error("strand_block_on_read: Failed to register fd for read events");
     }
 #endif
 
@@ -576,7 +582,8 @@ void strand_block_on_write(int fd) {
     ev.events = EPOLLOUT | EPOLLET | EPOLLONESHOT;  // Edge-triggered, one-shot like kqueue
     ev.data.ptr = strand;
     if (epoll_ctl(global_scheduler.epoll_fd, EPOLL_CTL_ADD, fd, &ev) == -1) {
-        runtime_error("strand_block_on_write: epoll_ctl failed");
+        perror("strand_block_on_write: epoll_ctl failed");
+        runtime_error("strand_block_on_write: Failed to register fd for write events");
     }
 #endif
 
@@ -673,11 +680,12 @@ StackCell* scheduler_run(void) {
             // No ready strands, but we have blocked strands waiting for I/O
             // Wait for I/O events
 #ifdef USE_KQUEUE
-            struct kevent events[32];  // Handle up to 32 events at once
-            int nevents = kevent(global_scheduler.kqueue_fd, NULL, 0, events, 32, NULL);
+            struct kevent events[MAX_IO_EVENTS];
+            int nevents = kevent(global_scheduler.kqueue_fd, NULL, 0, events, MAX_IO_EVENTS, NULL);
 
             if (nevents == -1) {
-                runtime_error("scheduler_run: kevent wait failed");
+                perror("scheduler_run: kevent wait failed");
+                runtime_error("scheduler_run: I/O event wait failed");
             }
 
             // Process events - move strands from blocked to ready
@@ -693,11 +701,12 @@ StackCell* scheduler_run(void) {
                 ready_queue_push(strand);
             }
 #elif defined(USE_EPOLL)
-            struct epoll_event events[32];  // Handle up to 32 events at once
-            int nevents = epoll_wait(global_scheduler.epoll_fd, events, 32, -1);  // -1 = block indefinitely
+            struct epoll_event events[MAX_IO_EVENTS];
+            int nevents = epoll_wait(global_scheduler.epoll_fd, events, MAX_IO_EVENTS, -1);  // -1 = block indefinitely
 
             if (nevents == -1) {
-                runtime_error("scheduler_run: epoll_wait failed");
+                perror("scheduler_run: epoll_wait failed");
+                runtime_error("scheduler_run: I/O event wait failed");
             }
 
             // Process events - move strands from blocked to ready

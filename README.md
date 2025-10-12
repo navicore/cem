@@ -125,7 +125,14 @@ Cem requires:
 - Clang (for C runtime compilation)
 - LLVM tools (`llc`, `lli`)
 
-**Platform Support**: Currently macOS and FreeBSD only (uses kqueue for async I/O). Linux support (epoll) is planned for a future release.
+**Platform Support**: 
+- ✅ **ARM64 macOS** - Fully supported (kqueue I/O, custom context switching)
+- ✅ **x86-64 Linux** - Fully supported (epoll I/O, custom context switching)
+- 🔄 **x86-64 macOS** - Partial support (needs context switching port)
+- 🔄 **ARM64 Linux** - Partial support (needs context switching port)
+- 🔄 **FreeBSD/OpenBSD/NetBSD** - Partial support (has kqueue, needs context switching per arch)
+
+See `PLATFORM_STATUS.md` for detailed platform support information.
 
 Build the compiler and runtime:
 ```bash
