@@ -32,6 +32,25 @@ with linear types, this prevents data races statically.
 **The goal**: A production-grade language proving concatenative + linear types
 can be both safe and practical.
 
+## Concurrency Model
+
+Cem uses **cooperative green threads (strands)** for massive concurrency:
+
+- ✅ **Hundreds of thousands of concurrent strands** - Lightweight (4KB-1MB stacks)
+- ✅ **Single OS thread event loop** - All strands run cooperatively on one thread
+- ✅ **Non-blocking I/O** - Async event loop (kqueue/epoll) for true concurrency
+- ✅ **Explicit yield points** - Strands yield only at I/O operations, never during computation
+
+**What this means:**
+- **Excellent for I/O-bound workloads** - Web servers, file processing, network services
+- **Deterministic execution** - No data races, no preemption between I/O calls
+- **Erlang-scale concurrency** - Handle 100K+ partially-executed concurrent tasks
+- **Not parallel** - CPU-bound work uses one core (multi-threading planned for Phase 4+)
+
+**Perfect for:** Web servers with 100K concurrent connections, async file processing pipelines, actor-based systems where tasks spend most time waiting on I/O.
+
+See [docs/IO_ARCHITECTURE.md](docs/IO_ARCHITECTURE.md) for detailed concurrency semantics.
+
 ## Core Values
 
 - **Compile-time safety**: Type system catches errors before runtime

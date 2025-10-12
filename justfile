@@ -115,8 +115,9 @@ build-runtime:
     cd runtime && clang -Wall -Wextra -std=c11 -g -O2 -c context.c -o context.o
     cd runtime && clang -Wall -Wextra -std=c11 -g -O2 -c scheduler.c -o scheduler.o
     cd runtime && clang -Wall -Wextra -std=c11 -g -O2 -c io.c -o io.o
+    cd runtime && clang -Wall -Wextra -std=c11 -g -O2 -c stack_mgmt.c -o stack_mgmt.o
     cd runtime && clang -g -O2 -c context_arm64.s -o context_arm64.o
-    cd runtime && ar rcs libcem_runtime.a stack.o context.o context_arm64.o scheduler.o io.o
+    cd runtime && ar rcs libcem_runtime.a stack.o context.o context_arm64.o scheduler.o io.o stack_mgmt.o
     @echo "✅ Built runtime/libcem_runtime.a"
 
 # Build runtime test program
@@ -154,8 +155,15 @@ test-io-cleanup: build-runtime
     ./tests/test_io_cleanup
     @echo "✅ I/O cleanup tests passed"
 
-# Run all runtime tests (Phase 2b)
-test-all-runtime: test-runtime test-scheduler test-context test-cleanup test-io-cleanup
+# Test dynamic stack growth (Phase 3)
+test-stack-growth: build-runtime
+    @echo "Building stack growth stress tests..."
+    clang -Wall -Wextra -std=c11 -g tests/test_stack_growth.c -Lruntime -lcem_runtime -o tests/test_stack_growth
+    ./tests/test_stack_growth
+    @echo "✅ Stack growth stress tests passed"
+
+# Run all runtime tests (Phase 3)
+test-all-runtime: test-runtime test-scheduler test-context test-cleanup test-io-cleanup test-stack-growth
     @echo ""
     @echo "🎉 All runtime tests passed!"
 

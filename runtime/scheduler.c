@@ -5,13 +5,14 @@
  * (strands). The scheduler uses custom assembly context switching
  * (cem_makecontext/cem_swapcontext) for fast, portable context switches.
  *
- * Phase 2b Implementation (current):
+ * Phase 3 Implementation (current):
  * - Strand structure with cem_context_t
  * - FIFO ready queue
  * - Fast context switching via custom assembly (ARM64/x86-64)
  * - Cleanup handler infrastructure for resource management
- * - 64KB C stacks per strand
- * - Target: ~10,000 concurrent strands (faster and leak-free)
+ * - Dynamic C stacks: 4KB initial, grows to 1MB max
+ * - Checkpoint-based proactive growth + emergency guard page
+ * - Target: 500,000+ concurrent strands (Erlang-scale!)
  *
  * See docs/SCHEDULER_IMPLEMENTATION.md for roadmap.
  */
@@ -36,10 +37,8 @@ extern int kqueue(void);
 // Configuration Constants
 // ============================================================================
 
-// Phase 2a: 64KB stacks (generous for initial implementation)
-// Phase 2b will reduce this to 8KB with assembly context switching
-// Phase 3 will use 2-4KB with dynamic growth
-#define STRAND_STACK_SIZE (64 * 1024)
+// Phase 3: Dynamic stacks - configuration moved to context.h
+// (CEM_INITIAL_STACK_SIZE, CEM_MIN_FREE_STACK, CEM_MAX_STACK_SIZE)
 
 // ============================================================================
 // Global Scheduler State
@@ -55,9 +54,9 @@ static bool scheduler_initialized = false;
 /**
  * Allocate and initialize a new strand (without setting entry function)
  *
- * This allocates the strand structure and its C stack, but does not
- * initialize the context with an entry function. Use strand_init_context()
- * for that.
+ * This allocates the strand structure and its dynamic C stack with guard page.
+ * The stack starts at 4KB and grows automatically up to 1MB as needed.
+ * Use strand_init_context() to initialize the context with an entry function.
  */
 static Strand* strand_alloc(uint64_t id, StackCell* initial_stack) {
     Strand* strand = (Strand*)malloc(sizeof(Strand));
@@ -65,17 +64,16 @@ static Strand* strand_alloc(uint64_t id, StackCell* initial_stack) {
         runtime_error("strand_alloc: out of memory");
     }
 
-    // Allocate C stack for context switching
-    strand->c_stack = malloc(STRAND_STACK_SIZE);
-    if (!strand->c_stack) {
+    // Allocate dynamic C stack with guard page (Phase 3)
+    strand->stack_meta = stack_alloc(CEM_INITIAL_STACK_SIZE);
+    if (!strand->stack_meta) {
         free(strand);
-        runtime_error("strand_alloc: out of memory allocating stack");
+        runtime_error("strand_alloc: failed to allocate dynamic stack");
     }
 
     strand->id = id;
     strand->state = STRAND_READY;
     strand->stack = initial_stack;
-    strand->c_stack_size = STRAND_STACK_SIZE;
     strand->cleanup_handlers = NULL;  // No cleanup handlers initially
     strand->blocked_fd = -1;  // Not blocked on any FD initially
     strand->next = NULL;
@@ -130,9 +128,9 @@ static void strand_free(Strand* strand) {
     // Free the Cem stack
     free_stack(strand->stack);
 
-    // Free the C stack
-    if (strand->c_stack) {
-        free(strand->c_stack);
+    // Free the dynamic C stack with guard page (Phase 3)
+    if (strand->stack_meta) {
+        stack_free(strand->stack_meta);
     }
 
     free(strand);
@@ -197,6 +195,11 @@ void scheduler_init(void) {
     if (global_scheduler.kqueue_fd == -1) {
         runtime_error("scheduler_init: kqueue() failed");
     }
+
+    // Initialize dynamic stack management (Phase 3)
+    // Set up SIGSEGV handler for emergency guard page overflow
+    stack_guard_init_signal_handler();
+    stack_guard_set_scheduler(&global_scheduler);
 
     scheduler_initialized = true;
 }
@@ -290,11 +293,11 @@ uint64_t strand_spawn(StackCell* (*entry_func)(StackCell*), StackCell* initial_s
     // Store entry function in the strand for trampoline to use
     strand->entry_func = entry_func;
 
-    // Initialize context
+    // Initialize context with dynamic stack (Phase 3)
     // Set up the context to call strand_entry_trampoline when first switched to
     cem_makecontext(&strand->context,
-                    strand->c_stack,
-                    strand->c_stack_size,
+                    strand->stack_meta->usable_base,
+                    strand->stack_meta->usable_size,
                     strand_entry_trampoline,
                     NULL);  // No return function needed (trampoline handles completion)
 
@@ -587,6 +590,11 @@ StackCell* scheduler_run(void) {
             // Mark as running
             strand->state = STRAND_RUNNING;
             global_scheduler.current_strand = strand;
+
+            // Phase 3: Checkpoint-based stack growth check
+            // Before switching to the strand, check if its stack needs to grow
+            // This is the primary growth mechanism (emergency guard page is backup)
+            stack_check_and_grow(strand, strand->context.sp);
 
             // Switch to strand
             // When strand yields or completes, we'll return here

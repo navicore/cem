@@ -47,6 +47,7 @@
 
 #include "stack.h"
 #include "context.h"
+#include "stack_mgmt.h"
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
@@ -99,24 +100,27 @@ typedef enum {
  *
  * Each strand maintains its own:
  * - Execution context (cem_context_t for context switching)
- * - C stack (malloced memory for C function calls, 64KB in Phase 2b)
+ * - Dynamic C stack (mmap'd with guard page, starts at 4KB, grows to 1MB max)
  * - Cem stack (pointer to StackCell linked list)
  * - Current state (ready/running/yielded/completed)
  *
  * Memory layout considerations:
- * Phase 2b:
+ * Phase 3 (Dynamic Stacks):
  * - cem_context_t: 168 bytes (ARM64) or 64 bytes (x86-64)
- * - C stack: 64KB (allocated via malloc)
+ * - C stack: 4KB initial, grows dynamically up to 1MB
  * - StackCell pointer: 8 bytes
- * - Total per strand: ~64.2KB
+ * - StackMetadata: ~64 bytes
+ * - Total per strand: ~4.3KB initially, grows as needed
+ * - With 10,000 strands: ~43MB (vs 640MB in Phase 2b!)
  */
 typedef struct Strand {
     uint64_t id;              // Unique strand identifier
     StrandState state;        // Current execution state
     StackCell* stack;         // Strand's isolated Cem stack
     cem_context_t context;    // Execution context for context switching
-    void* c_stack;            // Allocated C stack (for context switching)
-    size_t c_stack_size;      // Size of C stack (64KB in Phase 2b)
+
+    // Phase 3: Dynamic stack with guard page
+    StackMetadata* stack_meta;  // Dynamic stack metadata (replaces c_stack/c_stack_size)
 
     // Entry function (for initial context setup)
     StackCell* (*entry_func)(StackCell*);  // Entry function for this strand
