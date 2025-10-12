@@ -297,10 +297,6 @@ impl CodeGen {
         writeln!(&mut self.output, "  call void @scheduler_shutdown()")
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
-        // Print final stack (for debugging/testing)
-        writeln!(&mut self.output, "  call void @print_stack(ptr %stack)")
-            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
-
         // Clean up
         writeln!(&mut self.output, "  call void @free_stack(ptr %stack)")
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
