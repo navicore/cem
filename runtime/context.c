@@ -26,7 +26,8 @@ void cem_makecontext(cem_context_t* ctx,
     // Validate inputs
     assert(ctx != NULL && "context pointer cannot be NULL");
     assert(stack_base != NULL && "stack base pointer cannot be NULL");
-    assert(stack_size >= 4096 && "stack size must be at least 4KB (4096 bytes) for safe execution");
+    assert(stack_size > 0 && "stack size must be positive (for alignment safety)");
+    assert(stack_size >= CEM_MIN_STACK_SIZE && "stack size must be at least CEM_MIN_STACK_SIZE for safe execution");
     assert(func != NULL && "function pointer cannot be NULL");
 
     // Zero out the context

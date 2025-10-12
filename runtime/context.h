@@ -116,6 +116,18 @@ typedef struct {
 #endif
 
 // ============================================================================
+// Configuration Constants
+// ============================================================================
+
+/**
+ * Minimum stack size for safe execution
+ *
+ * 4KB is sufficient for most strand operations while preventing
+ * dangerously small stacks that could overflow immediately.
+ */
+#define CEM_MIN_STACK_SIZE 4096
+
+// ============================================================================
 // Context Switching API
 // ============================================================================
 
@@ -137,21 +149,26 @@ void cem_swapcontext(cem_context_t* save_ctx, const cem_context_t* restore_ctx);
 /**
  * Initialize a context for a new strand
  *
+ * INTERNAL API: This function should ONLY be called from strand_spawn().
+ * Direct calls from user code are not supported and may cause undefined behavior.
+ *
  * This sets up a context to start executing `func` with the given
  * stack. When `func` returns, control passes to `return_func`.
  *
  * C implementation is in context.c
  *
- * @param ctx - Context to initialize
+ * @param ctx - Context to initialize (must be non-NULL)
  * @param stack_base - Starting address of the C stack allocation (low address).
  *                     NOTE: Despite the name "base", this is the LOW address
  *                     of the stack memory. On ARM64/x86-64, stacks grow downward,
  *                     so the stack pointer will be set to (stack_base + stack_size)
- *                     which is the high address.
- * @param stack_size - Size of the C stack in bytes (minimum 4KB)
- * @param func - Function to execute (receives no args, returns void)
- * @param return_func - Function to call when func returns (currently unused,
- *                      see implementation for details)
+ *                     which is the high address. Must be non-NULL.
+ * @param stack_size - Size of the C stack in bytes (minimum CEM_MIN_STACK_SIZE).
+ *                     Must be positive.
+ * @param func - Function to execute (receives no args, returns void). Must be non-NULL.
+ * @param return_func - Function to call when func returns. Currently unused because
+ *                      strand_spawn() uses strand_entry_trampoline which handles
+ *                      cleanup. This parameter exists for potential future use.
  */
 void cem_makecontext(cem_context_t* ctx,
                      void* stack_base,
