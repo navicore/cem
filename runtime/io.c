@@ -44,6 +44,10 @@ static void ensure_nonblocking_io(void) {
 /**
  * Write a string to stdout with newline
  * Stack effect: ( str -- )
+ *
+ * KNOWN LIMITATION (Phase 2a): If a strand is terminated while blocked in this
+ * function (e.g., during scheduler_shutdown), the malloc'd buffer will leak.
+ * This will be fixed in Phase 2b with proper cleanup handlers.
  */
 StackCell* write_line(StackCell* stack) {
     ensure_nonblocking_io();
@@ -102,6 +106,10 @@ StackCell* write_line(StackCell* stack) {
 /**
  * Read a line from stdin
  * Stack effect: ( -- str )
+ *
+ * KNOWN LIMITATION (Phase 2a): If a strand is terminated while blocked in this
+ * function (e.g., during scheduler_shutdown), the malloc'd buffer will leak.
+ * This will be fixed in Phase 2b with proper cleanup handlers.
  */
 StackCell* read_line(StackCell* stack) {
     ensure_nonblocking_io();

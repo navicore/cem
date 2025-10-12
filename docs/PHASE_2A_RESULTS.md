@@ -117,6 +117,12 @@ You typed: Final Line
    - This is inefficient but simple
    - Could be optimized with buffering
 
+5. **I/O Buffer Memory Leak**: If a strand is terminated while blocked in `write_line()` or `read_line()`, the malloc'd buffer will leak
+   - **Root Cause**: These functions allocate buffers as local variables. When `strand_block_on_read()` or `strand_block_on_write()` yields, the function is suspended. If the strand is freed (e.g., during `scheduler_shutdown()`), the C stack is freed but there's no cleanup handler to free the buffers.
+   - **Impact**: In normal operation, strands complete their I/O and buffers are freed. Leak only occurs if strands are forcibly terminated while blocked.
+   - **Mitigation**: Phase 2b will add cleanup handlers to properly free resources when strands are terminated.
+   - **Current Scope**: For Phase 2a, this is an acceptable limitation as our test programs complete normally.
+
 ## API Reference
 
 ### Scheduler Functions
