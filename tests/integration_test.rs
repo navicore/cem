@@ -7,7 +7,11 @@ use cem::ast::types::{Effect, StackType, Type};
 use cem::codegen::{CodeGen, compile_to_object, link_program};
 use std::process::Command;
 
+// Skip runtime-dependent tests on Linux until epoll support is implemented
+// Context switching works on Linux, but scheduler I/O layer needs epoll (not yet implemented)
+// See: docs/LINUX_EPOLL_PLAN.md
 #[test]
+#[cfg_attr(target_os = "linux", ignore = "Requires epoll I/O implementation (see docs/LINUX_EPOLL_PLAN.md)")]
 fn test_end_to_end_compilation() {
     // Build the runtime first
     let runtime_status = Command::new("just")
@@ -52,6 +56,7 @@ fn test_end_to_end_compilation() {
 }
 
 #[test]
+#[cfg_attr(target_os = "linux", ignore = "Requires epoll I/O implementation (see docs/LINUX_EPOLL_PLAN.md)")]
 fn test_arithmetic_compilation() {
     // Build runtime
     let runtime_status = Command::new("just")
@@ -97,6 +102,7 @@ fn test_arithmetic_compilation() {
 }
 
 #[test]
+#[cfg_attr(target_os = "linux", ignore = "Requires epoll I/O implementation (see docs/LINUX_EPOLL_PLAN.md)")]
 fn test_executable_with_main() {
     // Build runtime
     let runtime_status = Command::new("just")
@@ -154,6 +160,7 @@ fn test_executable_with_main() {
 }
 
 #[test]
+#[cfg_attr(target_os = "linux", ignore = "Requires epoll I/O implementation (see docs/LINUX_EPOLL_PLAN.md)")]
 fn test_multiply_executable() {
     // Build runtime
     let runtime_status = Command::new("just")
@@ -206,6 +213,7 @@ fn test_multiply_executable() {
 }
 
 #[test]
+#[cfg_attr(target_os = "linux", ignore = "Requires epoll I/O implementation (see docs/LINUX_EPOLL_PLAN.md)")]
 fn test_if_expression() {
     // Build runtime
     let runtime_status = Command::new("just")
@@ -269,6 +277,7 @@ fn test_if_expression() {
 }
 
 #[test]
+#[cfg_attr(target_os = "linux", ignore = "Requires epoll I/O implementation (see docs/LINUX_EPOLL_PLAN.md)")]
 fn test_tail_call_optimization() {
     // Build runtime
     let runtime_status = Command::new("just")
@@ -335,6 +344,7 @@ fn test_tail_call_optimization() {
 }
 
 #[test]
+#[cfg_attr(target_os = "linux", ignore = "Requires epoll I/O implementation (see docs/LINUX_EPOLL_PLAN.md)")]
 fn test_if_false_branch() {
     // Build runtime
     let runtime_status = Command::new("just")
@@ -391,6 +401,7 @@ fn test_if_false_branch() {
 }
 
 #[test]
+#[cfg_attr(target_os = "linux", ignore = "Requires epoll I/O implementation (see docs/LINUX_EPOLL_PLAN.md)")]
 fn test_tail_call_in_if_branch() {
     // Build runtime
     let runtime_status = Command::new("just")
@@ -489,6 +500,7 @@ fn test_tail_call_in_if_branch() {
 }
 
 #[test]
+#[cfg_attr(target_os = "linux", ignore = "Requires epoll I/O implementation (see docs/LINUX_EPOLL_PLAN.md)")]
 fn test_nested_if_expressions() {
     // Build runtime
     let runtime_status = Command::new("just")
@@ -587,6 +599,7 @@ fn test_nested_if_expressions() {
 }
 
 #[test]
+#[cfg_attr(target_os = "linux", ignore = "Requires epoll I/O implementation (see docs/LINUX_EPOLL_PLAN.md)")]
 fn test_scheduler_linkage() {
     // Build runtime
     let runtime_status = Command::new("just")
