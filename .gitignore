@@ -10,6 +10,11 @@ runtime/*.dSYM/
 # Test artifacts
 test_*
 !test_*.rs
+!tests/test_*.c
 *.ll
 *.o
 a.out
+
+# Generated executables
+/hello_io
+/echo
