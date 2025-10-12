@@ -20,13 +20,21 @@
 extern long sysconf(int);
 
 // Platform-specific _SC_PAGESIZE values
-// These values are OS-specific, not architecture-specific
+// We try multiple common values and use runtime detection with fallback
+// This is more robust than hardcoding OS-specific constants that may change
 #if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
-    #define _SC_PAGESIZE 29  // BSD-based systems (macOS, FreeBSD, etc.)
+    // BSD-based systems typically use 29, but we'll try multiple values
+    static const int SC_PAGESIZE_CANDIDATES[] = {29, 30, -1};
+    #define DEFAULT_PAGE_SIZE 16384  // 16KB on Apple Silicon, 4KB on Intel
 #elif defined(__linux__)
-    #define _SC_PAGESIZE 30  // Linux
+    // Linux typically uses 30, but we'll try multiple values
+    static const int SC_PAGESIZE_CANDIDATES[] = {30, 29, -1};
+    #define DEFAULT_PAGE_SIZE 4096   // 4KB on most Linux systems
 #else
-    #error "Unknown platform for _SC_PAGESIZE constant"
+    // Unknown platform - try common values and fall back to 4KB
+    static const int SC_PAGESIZE_CANDIDATES[] = {30, 29, -1};
+    #define DEFAULT_PAGE_SIZE 4096
+    #warning "Unknown platform - page size detection may fail, will fall back to 4KB"
 #endif
 
 // ============================================================================
@@ -42,17 +50,28 @@ static Scheduler* g_scheduler = NULL;
 
 /**
  * Get system page size (cached)
+ *
+ * Uses robust detection with multiple fallback strategies:
+ * 1. Try multiple _SC_PAGESIZE candidate values via sysconf()
+ * 2. If all fail, use platform-specific default
  */
 size_t stack_get_page_size(void) {
     if (g_page_size == 0) {
-        g_page_size = (size_t)sysconf(_SC_PAGESIZE);
-        if (g_page_size == 0 || g_page_size == (size_t)-1) {
-            // Fallback to common page sizes
-            #ifdef __APPLE__
-                g_page_size = 16384;  // 16KB on Apple Silicon
-            #else
-                g_page_size = 4096;   // 4KB on most other systems
-            #endif
+        // Try each candidate _SC_PAGESIZE value until one works
+        // This handles variations across OS versions robustly
+        for (int i = 0; SC_PAGESIZE_CANDIDATES[i] != -1; i++) {
+            long result = sysconf(SC_PAGESIZE_CANDIDATES[i]);
+            if (result > 0 && result != -1) {
+                g_page_size = (size_t)result;
+                break;
+            }
+        }
+
+        // If all candidates failed, use platform-specific default
+        if (g_page_size == 0) {
+            g_page_size = DEFAULT_PAGE_SIZE;
+            fprintf(stderr, "WARNING: Could not detect page size via sysconf(), using default %zu bytes\n",
+                    g_page_size);
         }
     }
     return g_page_size;
@@ -136,6 +155,17 @@ StackMetadata* stack_alloc(size_t initial_size) {
 
 /**
  * Free a dynamic stack
+ *
+ * Note on munmap() failure handling:
+ * If munmap() fails, we have a memory leak (the mapped region remains).
+ * We still free the metadata because:
+ * 1. The metadata is small (~80 bytes) compared to the mapped region (KB-MB)
+ * 2. Keeping the metadata doesn't help us recover - we can't retry munmap()
+ * 3. The strand is terminating anyway, so the leak will be visible in metrics
+ * 4. On process exit, the OS will reclaim all mapped memory
+ *
+ * In practice, munmap() should never fail for our use case (simple anonymous mappings).
+ * If it does fail, it indicates a serious kernel issue or corrupted metadata.
  */
 void stack_free(StackMetadata* meta) {
     if (!meta) {
@@ -144,9 +174,22 @@ void stack_free(StackMetadata* meta) {
 
     if (meta->base) {
         if (munmap(meta->base, meta->total_size) != 0) {
-            fprintf(stderr, "WARNING: munmap failed during stack_free (addr=%p, size=%zu)\n",
-                    meta->base, meta->total_size);
-            // Continue anyway - we can't do much about it
+            // munmap() failed - this is very rare and indicates either:
+            // 1. Corrupted metadata (base/total_size are wrong)
+            // 2. Kernel issue (out of memory in kernel page tables)
+            // 3. The memory was already unmapped (double-free)
+            fprintf(stderr, "ERROR: munmap failed during stack_free\n");
+            fprintf(stderr, "  Address: %p\n", meta->base);
+            fprintf(stderr, "  Size: %zu bytes\n", meta->total_size);
+            fprintf(stderr, "  This will cause a memory leak (%zu bytes)!\n", meta->total_size);
+            fprintf(stderr, "  Possible causes:\n");
+            fprintf(stderr, "    - Corrupted stack metadata\n");
+            fprintf(stderr, "    - Double-free of stack\n");
+            fprintf(stderr, "    - Kernel resource exhaustion\n");
+
+            // We still free the metadata to avoid a metadata leak on top of the memory leak.
+            // The small metadata leak (80 bytes) is less severe than the large mapped region leak,
+            // but we can at least prevent compounding the problem.
         }
     }
 
@@ -233,12 +276,30 @@ bool stack_grow(struct Strand* strand, size_t new_usable_size) {
     uintptr_t old_stack_top = (uintptr_t)old_meta->usable_base + old_meta->usable_size;
     size_t used_bytes = (size_t)(old_stack_top - old_sp);
 
-    // Sanity check
+    // Sanity check for SP corruption
+    // If SP is corrupted, we MUST abort immediately. Continuing execution with
+    // a corrupted stack pointer leads to undefined behavior and crashes.
     if (used_bytes > old_meta->usable_size) {
-        fprintf(stderr, "stack_grow: SP corruption detected (used %zu > size %zu)\n",
-                used_bytes, old_meta->usable_size);
+        fprintf(stderr, "\n");
+        fprintf(stderr, "========================================\n");
+        fprintf(stderr, "FATAL: Stack pointer corruption detected\n");
+        fprintf(stderr, "========================================\n");
+        fprintf(stderr, "Strand ID: %llu\n", (unsigned long long)strand->id);
+        fprintf(stderr, "Stack size: %zu bytes\n", old_meta->usable_size);
+        fprintf(stderr, "Calculated usage: %zu bytes (SP is corrupted!)\n", used_bytes);
+        fprintf(stderr, "Stack base: %p\n", old_meta->usable_base);
+        fprintf(stderr, "Stack top: %p\n", (void*)old_stack_top);
+        fprintf(stderr, "Current SP: %p\n", (void*)old_sp);
+        fprintf(stderr, "\n");
+        fprintf(stderr, "This indicates either:\n");
+        fprintf(stderr, "  1. Memory corruption (buffer overflow, use-after-free)\n");
+        fprintf(stderr, "  2. Context switching bug\n");
+        fprintf(stderr, "  3. Stack metadata corruption\n");
+        fprintf(stderr, "\n");
+        fprintf(stderr, "Cannot continue safely. Aborting.\n");
+        fprintf(stderr, "========================================\n");
         stack_free(new_meta);
-        return false;
+        abort();  // Immediate termination - corrupted state is unrecoverable
     }
 
     // Copy stack contents from old to new

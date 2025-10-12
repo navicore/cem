@@ -32,6 +32,35 @@
  * 3. Growth: allocate new stack (2x size), memcpy old contents, update pointers
  * 4. If guard page is hit, SIGSEGV handler grows stack as emergency fallback
  * 5. If guard page is hit, log warning (indicates heuristic needs tuning)
+ *
+ * ============================================================================
+ * THREAD SAFETY WARNING - CRITICAL ASSUMPTIONS
+ * ============================================================================
+ *
+ * This implementation makes STRONG assumptions about the threading model:
+ *
+ * 1. **Single-threaded cooperative scheduler only**
+ *    - Cem uses cooperative multitasking with explicit yield points
+ *    - No OS-level preemption between strands
+ *    - Only ONE strand executes at a time
+ *
+ * 2. **Signal handler accesses global state WITHOUT locks**
+ *    - The SIGSEGV handler reads g_scheduler and current_strand
+ *    - This is SAFE ONLY because signals arrive synchronously during strand execution
+ *    - The executing strand's metadata is stable (not being modified elsewhere)
+ *
+ * 3. **If you port Cem to multi-threading or preemptive scheduling:**
+ *    - Add proper locking around scheduler state (g_scheduler, current_strand)
+ *    - Use atomic operations for stack metadata updates
+ *    - Consider per-thread signal handlers or disable signals during critical sections
+ *    - Review ALL uses of global state in this module
+ *
+ * 4. **Stack growth operations are NOT reentrant**
+ *    - If a signal interrupts stack_grow(), behavior is undefined
+ *    - For production use, consider blocking signals during growth operations
+ *
+ * VIOLATING THESE ASSUMPTIONS WILL CAUSE DATA RACES AND CRASHES.
+ * See stack_sigsegv_handler() in stack_mgmt.c for detailed thread safety notes.
  */
 
 #ifndef CEM_RUNTIME_STACK_MGMT_H
