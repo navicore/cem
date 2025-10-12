@@ -272,14 +272,17 @@ void test_stack_size_assertion(void) {
     void* stack = malloc(64 * 1024);
     assert(stack != NULL);
 
-    // This should succeed (16 bytes is minimum)
-    cem_makecontext(&test_ctx1, stack, 16, simple_func, NULL);
+    // This should succeed (4KB is minimum for safe execution)
+    cem_makecontext(&test_ctx1, stack, 4096, simple_func, NULL);
+
+    // Also test that larger stacks work
+    cem_makecontext(&test_ctx1, stack, 64 * 1024, simple_func, NULL);
 
     // Note: Can't easily test assertion failure without crashing
     // In a real test harness, we'd use death tests
 
     free(stack);
-    printf("  ✓ Stack size validation works\n");
+    printf("  ✓ Stack size validation works (4KB minimum)\n");
 }
 
 int main(void) {

@@ -26,7 +26,7 @@ void cem_makecontext(cem_context_t* ctx,
     // Validate inputs
     assert(ctx != NULL && "context pointer cannot be NULL");
     assert(stack_base != NULL && "stack base pointer cannot be NULL");
-    assert(stack_size >= 16 && "stack size must be at least 16 bytes for alignment");
+    assert(stack_size >= 4096 && "stack size must be at least 4KB (4096 bytes) for safe execution");
     assert(func != NULL && "function pointer cannot be NULL");
 
     // Zero out the context
@@ -71,41 +71,9 @@ void cem_makecontext(cem_context_t* ctx,
     (void)return_func;  // Unused - see safety note above
 
 #elif defined(CEM_ARCH_X86_64)
-    // x86-64 implementation is not yet complete or tested
-    // The stack manipulation below is questionable and will likely fail
+    // x86-64 context switching is not yet implemented
+    // TODO: Implement x86-64 assembly (similar to context_arm64.s)
     #error "x86-64 context switching is not yet implemented. Only ARM64 macOS is currently supported."
-
-    // TODO: Implement and test x86-64 context switching
-    // Issues to address:
-    // 1. Stack setup with return address needs verification
-    // 2. Interaction with cem_swapcontext needs testing
-    // 3. Need x86-64 assembly implementation of cem_swapcontext
-
-    /* INCOMPLETE CODE - DO NOT USE
-    // x86-64: Stack grows downward, must be 16-byte aligned before CALL
-    // Set stack pointer to top of stack (high address)
-    uintptr_t stack_top = (uintptr_t)stack_base + stack_size;
-
-    // Align to 16 bytes, then subtract 8 for return address
-    stack_top &= ~15ULL;
-    stack_top -= 8;
-
-    // Push return address onto stack
-    uint64_t* stack_ptr = (uint64_t*)stack_top;
-    *stack_ptr = (uint64_t)return_func;
-
-    ctx->rsp = stack_top;
-
-    // Push function address (will be popped by ret instruction)
-    stack_top -= 8;
-    stack_ptr = (uint64_t*)stack_top;
-    *stack_ptr = (uint64_t)func;
-
-    ctx->rsp = stack_top;
-
-    // Initialize MXCSR to default state
-    ctx->mxcsr = 0x1F80;  // Default: all exceptions masked
-    */
 
 #endif
 }
