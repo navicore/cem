@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <stdint.h>  // For SIZE_MAX
 
 // Forward declare sysconf to avoid including unistd.h
 // (unistd.h conflicts with stack.h's dup() function)
@@ -77,8 +78,21 @@ StackMetadata* stack_alloc(size_t initial_size) {
         return NULL;
     }
 
-    // Round up to page boundary
+    // Round up to page boundary with overflow checking
+    // Check: initial_size + page_size - 1 might overflow
+    if (initial_size > SIZE_MAX - page_size) {
+        fprintf(stderr, "stack_alloc: size %zu too large (overflow risk)\n", initial_size);
+        return NULL;
+    }
+
     size_t usable_size = ((initial_size + page_size - 1) / page_size) * page_size;
+
+    // Check: usable_size + page_size might overflow
+    if (usable_size > SIZE_MAX - page_size) {
+        fprintf(stderr, "stack_alloc: usable size %zu too large (overflow risk)\n", usable_size);
+        return NULL;
+    }
+
     size_t total_size = usable_size + page_size;  // +1 page for guard
 
     // Allocate metadata
@@ -271,6 +285,19 @@ bool stack_grow(struct Strand* strand, size_t new_usable_size) {
             strand->context.rbp = new_stack_top - offset_from_top;
         }
 
+        // RUNTIME WARNING for x86-64 limitation
+        static bool x86_64_warning_shown = false;
+        if (!x86_64_warning_shown) {
+            fprintf(stderr, "\n");
+            fprintf(stderr, "WARNING: x86-64 stack growth detected!\n");
+            fprintf(stderr, "  x86-64 return address adjustment is NOT implemented.\n");
+            fprintf(stderr, "  If this strand has return addresses on its stack,\n");
+            fprintf(stderr, "  it will likely crash after growth.\n");
+            fprintf(stderr, "  This warning will only be shown once.\n");
+            fprintf(stderr, "\n");
+            x86_64_warning_shown = true;
+        }
+
         // LIMITATION: x86-64 return addresses need adjustment
         //
         // Unlike ARM64 (which stores return addresses in LR register), x86-64 stores
@@ -345,7 +372,12 @@ bool stack_check_and_grow(struct Strand* strand, uintptr_t current_sp) {
         return false;
     }
 
-    // Grow by doubling (2x)
+    // Grow by doubling (2x) with overflow check
+    if (meta->usable_size > SIZE_MAX / 2) {
+        fprintf(stderr, "ERROR: Strand %llu stack size %zu cannot be doubled (overflow)\n",
+                (unsigned long long)strand->id, meta->usable_size);
+        return false;
+    }
     size_t new_size = meta->usable_size * 2;
 
     // Log reason
@@ -390,6 +422,17 @@ bool stack_is_guard_page_fault(uintptr_t addr, const StackMetadata* meta) {
 
 /**
  * SIGSEGV signal handler for emergency stack overflow
+ *
+ * THREAD SAFETY: This handler accesses g_scheduler and current_strand without locks.
+ * This is SAFE because:
+ * 1. Cem uses a single-threaded cooperative scheduler (no preemption)
+ * 2. Signals can only arrive while a strand is executing (not during scheduler code)
+ * 3. When a strand is running, current_strand is guaranteed to be valid and stable
+ * 4. The SIGSEGV is synchronous - it's triggered by the currently executing strand
+ * 5. We never modify g_scheduler or current_strand from signal context
+ *
+ * If Cem ever becomes multi-threaded or preemptive, this code will need
+ * atomic operations or locks.
  */
 static void stack_sigsegv_handler(int sig, siginfo_t *si, void *unused) {
     (void)sig;
@@ -398,6 +441,7 @@ static void stack_sigsegv_handler(int sig, siginfo_t *si, void *unused) {
     uintptr_t fault_addr = (uintptr_t)si->si_addr;
 
     // Check if fault is in current strand's guard page
+    // This read is safe - see thread safety note above
     if (g_scheduler && g_scheduler->current_strand) {
         Strand* strand = g_scheduler->current_strand;
 

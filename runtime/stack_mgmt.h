@@ -137,6 +137,22 @@ bool stack_grow(struct Strand* strand, size_t new_usable_size);
  * The signal handler checks if the fault address is within any strand's
  * guard page. If so, it grows that strand's stack and returns.
  * If not, it re-raises the signal for normal crash handling.
+ *
+ * IMPORTANT - ASYNC-SIGNAL-SAFETY:
+ * The signal handler is carefully designed to be async-signal-safe:
+ * - Uses write() instead of fprintf() for all output
+ * - Calls stack_grow() which uses mmap/munmap/memcpy (all signal-safe)
+ * - Accesses g_scheduler without locks (safe in cooperative single-threaded model)
+ *
+ * LIMITATIONS:
+ * - stack_grow() calls fprintf() for logging (NOT signal-safe, but acceptably risky)
+ * - If stack_grow() is interrupted by another signal, behavior is undefined
+ * - malloc/free in stack metadata are NOT signal-safe (but should be safe in practice)
+ *
+ * If these limitations become problematic, consider:
+ * - Disabling signals during stack growth (sigprocmask)
+ * - Pre-allocating emergency stack metadata
+ * - Removing all fprintf() calls from growth path
  */
 void stack_guard_init_signal_handler(void);
 
