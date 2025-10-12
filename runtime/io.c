@@ -152,13 +152,9 @@ StackCell* read_line(StackCell* stack) {
                         free(buffer);
                         runtime_error("read_line: out of memory");
                     }
-                    // Update cleanup handler with new buffer pointer
-                    // SAFETY: This is safe in cooperative multitasking - no context
-                    // switch can occur between pop and push since there are no
-                    // blocking operations. The buffer remains valid throughout.
-                    strand_pop_cleanup();
+                    // Update cleanup handler with new buffer pointer atomically
                     buffer = new_buffer;
-                    strand_push_cleanup(free, buffer);
+                    strand_update_cleanup_arg(buffer);
                 }
                 buffer[length++] = c;
             }
@@ -189,13 +185,9 @@ StackCell* read_line(StackCell* stack) {
             free(buffer);
             runtime_error("read_line: out of memory");
         }
-        // Update cleanup handler with new buffer pointer
-        // SAFETY: This is safe in cooperative multitasking - no context
-        // switch can occur between pop and push since there are no
-        // blocking operations. The buffer remains valid throughout.
-        strand_pop_cleanup();
+        // Update cleanup handler with new buffer pointer atomically
         buffer = new_buffer;
-        strand_push_cleanup(free, buffer);
+        strand_update_cleanup_arg(buffer);
     }
     buffer[length] = '\0';
 

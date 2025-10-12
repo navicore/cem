@@ -213,6 +213,19 @@ void strand_push_cleanup(CleanupFunc func, void* arg);
 void strand_pop_cleanup(void);
 
 /**
+ * Update the argument of the most recently registered cleanup handler
+ *
+ * This is useful when a resource pointer changes (e.g., after realloc)
+ * but the cleanup function remains the same. This is safer than pop+push
+ * because it ensures the cleanup handler is never unregistered during the update.
+ *
+ * IMPORTANT: This must only be called from within a strand.
+ *
+ * @param new_arg - New argument to pass to the cleanup function
+ */
+void strand_update_cleanup_arg(void* new_arg);
+
+/**
  * Yield execution from the current strand back to the scheduler
  *
  * This saves the current execution context and transfers control

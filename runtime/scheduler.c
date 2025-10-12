@@ -100,8 +100,13 @@ static void strand_run_cleanup_handlers(Strand* strand) {
         CleanupHandler* next = handler->next;
 
         // Call the cleanup function
+        // NOTE: handler->func should never be NULL if the API is used correctly,
+        // but we check anyway for defensive programming
         if (handler->func) {
             handler->func(handler->arg);
+        } else {
+            // This should never happen - it indicates a bug in cleanup handler registration
+            fprintf(stderr, "WARNING: cleanup handler with NULL function pointer\n");
         }
 
         // Free the handler node itself
@@ -319,6 +324,11 @@ void strand_push_cleanup(CleanupFunc func, void* arg) {
         runtime_error("strand_push_cleanup: no current strand");
     }
 
+    // Validate function pointer - NULL cleanup function makes no sense
+    if (!func) {
+        runtime_error("strand_push_cleanup: cleanup function cannot be NULL");
+    }
+
     // Allocate cleanup handler node
     CleanupHandler* handler = (CleanupHandler*)malloc(sizeof(CleanupHandler));
     if (!handler) {
@@ -358,6 +368,31 @@ void strand_pop_cleanup(void) {
 
     // Free the handler (but don't call the cleanup function)
     free(handler);
+}
+
+/**
+ * Update the argument of the most recently registered cleanup handler
+ *
+ * This atomically updates the handler's argument without unregistering it.
+ * Useful for realloc operations where the pointer changes but cleanup remains the same.
+ */
+void strand_update_cleanup_arg(void* new_arg) {
+    if (!scheduler_initialized) {
+        runtime_error("strand_update_cleanup_arg: scheduler not initialized");
+    }
+
+    Strand* strand = global_scheduler.current_strand;
+    if (!strand) {
+        runtime_error("strand_update_cleanup_arg: no current strand");
+    }
+
+    CleanupHandler* handler = strand->cleanup_handlers;
+    if (!handler) {
+        runtime_error("strand_update_cleanup_arg: no cleanup handlers to update");
+    }
+
+    // Atomically update the argument
+    handler->arg = new_arg;
 }
 
 // ============================================================================

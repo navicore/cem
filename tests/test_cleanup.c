@@ -320,6 +320,51 @@ void test_nested_cleanup(void) {
     printf("  ✓ Nested cleanup handlers execute in correct order\n");
 }
 
+// Test 8: Update cleanup handler argument (simulating realloc)
+static int* update_test_ptr = NULL;
+
+static void cleanup_free_int(void* arg) {
+    update_test_ptr = (int*)arg;
+}
+
+StackCell* strand_test_update_cleanup(StackCell* stack) {
+    // Allocate initial resource
+    int* ptr1 = malloc(sizeof(int));
+    *ptr1 = 42;
+    strand_push_cleanup(cleanup_free_int, ptr1);
+
+    // Simulate realloc by allocating new memory and updating handler
+    int* ptr2 = malloc(sizeof(int));
+    *ptr2 = 99;
+
+    // Update the cleanup handler to point to new memory
+    strand_update_cleanup_arg(ptr2);
+
+    // Free old pointer manually (as realloc would)
+    free(ptr1);
+
+    return stack;
+}
+
+void test_update_cleanup_arg(void) {
+    printf("Test 8: Update cleanup argument (realloc pattern)\n");
+
+    update_test_ptr = NULL;
+    scheduler_init();
+
+    strand_spawn(strand_test_update_cleanup, NULL);
+    scheduler_run();
+
+    scheduler_shutdown();
+
+    // Cleanup should have freed the NEW pointer (ptr2), not the old one
+    assert(update_test_ptr != NULL);
+    assert(*update_test_ptr == 99);
+    free(update_test_ptr);
+
+    printf("  ✓ Cleanup argument update works correctly\n");
+}
+
 int main(void) {
     printf("=== Cleanup Handler Tests ===\n\n");
 
@@ -330,6 +375,7 @@ int main(void) {
     test_many_cleanups();
     test_memory_cleanup();
     test_nested_cleanup();
+    test_update_cleanup_arg();
 
     printf("\n✅ All cleanup handler tests passed!\n");
     return 0;

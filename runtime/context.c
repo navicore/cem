@@ -33,8 +33,9 @@ void cem_makecontext(cem_context_t* ctx,
     memset(ctx, 0, sizeof(cem_context_t));
 
 #ifdef CEM_ARCH_ARM64
-    // ARM64: Stack grows downward, must be 16-byte aligned
-    // Set stack pointer to top of stack (high address)
+    // ARM64: Stack grows downward (from high address to low address)
+    // stack_base is the LOW address of the allocated memory
+    // stack_top (high address) is where the stack pointer starts
     uintptr_t stack_top = (uintptr_t)stack_base + stack_size;
 
     // Align to 16 bytes (required by ARM64 ABI)

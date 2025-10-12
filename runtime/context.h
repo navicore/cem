@@ -143,10 +143,15 @@ void cem_swapcontext(cem_context_t* save_ctx, const cem_context_t* restore_ctx);
  * C implementation is in context.c
  *
  * @param ctx - Context to initialize
- * @param stack_base - Base of the C stack (low address)
- * @param stack_size - Size of the C stack in bytes
+ * @param stack_base - Starting address of the C stack allocation (low address).
+ *                     NOTE: Despite the name "base", this is the LOW address
+ *                     of the stack memory. On ARM64/x86-64, stacks grow downward,
+ *                     so the stack pointer will be set to (stack_base + stack_size)
+ *                     which is the high address.
+ * @param stack_size - Size of the C stack in bytes (minimum 4KB)
  * @param func - Function to execute (receives no args, returns void)
- * @param return_func - Function to call when func returns
+ * @param return_func - Function to call when func returns (currently unused,
+ *                      see implementation for details)
  */
 void cem_makecontext(cem_context_t* ctx,
                      void* stack_base,
