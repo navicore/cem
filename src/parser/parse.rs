@@ -504,7 +504,7 @@ mod tests {
         for _ in 0..105 {
             input.push_str("] ");
         }
-        input.push_str(";");
+        input.push(';');
 
         let mut parser = Parser::new(&input);
         let result = parser.parse();

@@ -1,11 +1,11 @@
-use cemc::ast::types::{Effect, StackType, Type};
+use cemc::ast::types::{Effect, StackType};
 /**
  * Compile an echo program that reads a line and writes it back
  * Manually constructs AST for:
  * : echo ( -- ) read_line write_line ;
  */
 use cemc::ast::{Expr, Program, SourceLoc, WordDef};
-use cemc::codegen::{CodeGen, link_program};
+use cemc::codegen::{link_program, CodeGen};
 use std::process::Command;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
