@@ -20,8 +20,15 @@
 #include <sys/mman.h>
 #include <sys/types.h> // For ssize_t
 
-// Signal handling - we need to avoid including signal.h which pulls in unistd.h
-// Forward declare the types and functions we need
+// Signal handling
+// On macOS/BSD: Use system headers (no conflicts with dup())
+// On Linux: Forward declare to avoid unistd.h (which conflicts with stack.h's
+// dup())
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) ||      \
+    defined(__NetBSD__)
+#include <signal.h>
+#else
+// Linux: Forward declare the types and functions we need
 typedef struct {
   int si_signo;
   int si_errno;
@@ -46,6 +53,7 @@ extern int sigaction(int sig, const struct sigaction *act,
 extern int sigemptyset(void *set); // Take void* to avoid type mismatch
 extern void (*signal(int sig, void (*func)(int)))(int);
 extern int raise(int sig);
+#endif
 
 // Forward declare sysconf to avoid including unistd.h
 // (unistd.h conflicts with stack.h's dup() function)
