@@ -19,7 +19,7 @@ release:
     cargo build --release
 
 # Run all tests
-test:
+test: build-runtime
     cargo test
 
 # Run only library tests
