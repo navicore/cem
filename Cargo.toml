@@ -25,6 +25,9 @@ name = "cem"
 path = "src/main.rs"
 
 [dependencies]
-# No external dependencies! We generate LLVM IR as text and call clang directly.
+clap = { version = "4.5", features = ["derive", "cargo"] }
+clap_complete = "4.5"
+
+# Note: We generate LLVM IR as text and call clang directly.
 # This works with any LLVM version (10, 15, 18, 19, 21+)
-# See docs/LLVM_TEXT_IR.md for rationale.
+# See docs/architecture/LLVM_TEXT_IR.md for rationale.

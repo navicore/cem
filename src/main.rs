@@ -1,38 +1,76 @@
 use cemc::codegen::{CodeGen, link_program};
 use cemc::parser::Parser;
+use clap::{CommandFactory, Parser as ClapParser, Subcommand};
 use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+/// Cem Compiler - A concatenative language with green threads and linear types
+#[derive(ClapParser)]
+#[command(name = "cem")]
+#[command(author, version, about, long_about = None)]
+#[command(propagate_version = true)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Compile a Cem source file to an executable
+    Compile {
+        /// Input Cem source file
+        #[arg(value_name = "INPUT")]
+        input: String,
+
+        /// Output executable name (default: input filename without extension)
+        #[arg(short, long, value_name = "OUTPUT")]
+        output: Option<String>,
+
+        /// Keep intermediate LLVM IR file
+        #[arg(long)]
+        keep_ir: bool,
+    },
+
+    /// Generate shell completions
+    #[command(hide = true)]
+    Completions {
+        /// Shell to generate completions for
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args: Vec<String> = std::env::args().collect();
+    let cli = Cli::parse();
 
-    if args.len() < 3 {
-        eprintln!("Usage: cem compile <input.cem>");
-        eprintln!("       cem compile <input.cem> -o <output>");
-        std::process::exit(1);
+    match cli.command {
+        Commands::Compile {
+            input,
+            output,
+            keep_ir,
+        } => compile_command(&input, output.as_deref(), keep_ir),
+        Commands::Completions { shell } => {
+            generate_completions(shell);
+            Ok(())
+        }
     }
+}
 
-    let command = &args[1];
-    if command != "compile" {
-        eprintln!("Unknown command: {}", command);
-        eprintln!("Available commands: compile");
-        std::process::exit(1);
-    }
-
-    let input_file = &args[2];
-
+fn compile_command(
+    input_file: &str,
+    output_name: Option<&str>,
+    keep_ir: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
     // Determine output name
-    let output_name = if args.len() >= 5 && args[3] == "-o" {
-        args[4].clone()
-    } else {
+    let output_name = output_name.map(String::from).unwrap_or_else(|| {
         // Default: strip .cem extension and use as output name
         Path::new(input_file)
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("output")
             .to_string()
-    };
+    });
 
     // Read source file
     let source = fs::read_to_string(input_file)
@@ -73,17 +111,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let ir = codegen.compile_program_with_main(&program, entry_word)?;
 
-    // Write IR to file for debugging
+    // Write IR to file
     let ir_file = format!("{}.ll", output_name);
     fs::write(&ir_file, &ir)?;
-    println!("Wrote LLVM IR to {}", ir_file);
+    if keep_ir {
+        println!("Wrote LLVM IR to {}", ir_file);
+    }
 
     // Link with runtime
     println!("Linking...");
     link_program(&ir, "runtime/libcem_runtime.a", &output_name)?;
 
+    // Clean up IR file unless --keep-ir was specified
+    if !keep_ir {
+        fs::remove_file(&ir_file).ok();
+    }
+
     println!("\n✅ Successfully compiled to ./{}", output_name);
     println!("Run it with: ./{}", output_name);
 
     Ok(())
+}
+
+fn generate_completions(shell: clap_complete::Shell) {
+    let mut cmd = Cli::command();
+    let bin_name = cmd.get_name().to_string();
+    clap_complete::generate(shell, &mut cmd, bin_name, &mut std::io::stdout());
 }

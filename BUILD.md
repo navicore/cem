@@ -159,6 +159,26 @@ Cem builds and runs on:
 
 The text IR approach ensures LLVM version compatibility is never an issue.
 
+## Shell Completions
+
+Generate shell completions for the `cem` command:
+
+```bash
+# Bash
+cem completions bash > ~/.local/share/bash-completion/completions/cem
+
+# Zsh
+cem completions zsh > ~/.zsh/completions/_cem
+
+# Fish
+cem completions fish > ~/.config/fish/completions/cem.fish
+
+# PowerShell
+cem completions powershell > cem.ps1
+```
+
+Restart your shell or source the completion file to enable tab completion.
+
 ## Next Steps
 
 After successful build, see:
