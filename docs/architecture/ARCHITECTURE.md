@@ -275,5 +275,5 @@ Eventually, Cem might bootstrap itself:
 
 - [IO_ARCHITECTURE.md](./IO_ARCHITECTURE.md) - Async I/O design
 - [SCHEDULER_IMPLEMENTATION.md](./SCHEDULER_IMPLEMENTATION.md) - Green thread scheduler
-- [PHASE_2A_RESULTS.md](./PHASE_2A_RESULTS.md) - Phase 2a completion summary
+- [../archive/PHASE_2A_RESULTS.md](../archive/PHASE_2A_RESULTS.md) - Phase 2a completion summary
 - [LLVM_TEXT_IR.md](./LLVM_TEXT_IR.md) - LLVM IR generation approach

@@ -49,7 +49,7 @@ Cem uses **cooperative green threads (strands)** for massive concurrency:
 
 **Perfect for:** Web servers with 100K concurrent connections, async file processing pipelines, actor-based systems where tasks spend most time waiting on I/O.
 
-See [docs/IO_ARCHITECTURE.md](docs/IO_ARCHITECTURE.md) for detailed concurrency semantics.
+See [docs/architecture/IO_ARCHITECTURE.md](docs/architecture/IO_ARCHITECTURE.md) for detailed concurrency semantics.
 
 ## Core Values
 
@@ -104,7 +104,7 @@ providing full expressive power.
 ```
 
 The compiler automatically optimizes tail calls into jumps, making recursion as
-efficient as any loop. See [docs/recursion.md](docs/recursion.md) for details.
+efficient as any loop. See [docs/language/recursion.md](docs/language/recursion.md) for details.
 
 ## Status
 
@@ -114,9 +114,7 @@ efficient as any loop. See [docs/recursion.md](docs/recursion.md) for details.
 - Linear type tracking
 - Sum types (ADTs)
 
-See [DESIGN.md](DESIGN.md) for detailed design decisions.
-See [PLAN.md](PLAN.md) for development roadmap.
-See [EXAMPLES.md](EXAMPLES.md) for more code examples.
+See [docs/](docs/) for architecture, language design, and development guides.
 
 ## Building
 
@@ -148,7 +146,7 @@ cargo run --example compile_hello_io
 
 ## Debugging
 
-Cem binaries work with standard debuggers (LLDB/GDB) out of the box. You can step through runtime code, set breakpoints, and inspect memory. For Cem-specific debugging features (stack visualization, quotation inspection), see [docs/DEBUGGING.md](docs/DEBUGGING.md).
+Cem binaries work with standard debuggers (LLDB/GDB) out of the box. You can step through runtime code, set breakpoints, and inspect memory. For Cem-specific debugging features (stack visualization, quotation inspection), see [docs/development/DEBUGGING.md](docs/development/DEBUGGING.md).
 
 ## Project Structure
 

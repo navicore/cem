@@ -163,6 +163,6 @@ The text IR approach ensures LLVM version compatibility is never an issue.
 
 After successful build, see:
 - `README.md` - Project overview and language features
-- `docs/LLVM_TEXT_IR.md` - Why we use text IR instead of FFI
-- `docs/SELF_HOSTING.md` - Long-term vision
+- `docs/architecture/LLVM_TEXT_IR.md` - Why we use text IR instead of FFI
+- `docs/language/SELF_HOSTING.md` - Long-term vision
 - `stdlib/` - Standard library implementation

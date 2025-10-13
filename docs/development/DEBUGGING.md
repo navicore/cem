@@ -66,7 +66,7 @@ entry:
 
 **Goal**: Map LLVM IR back to Cem source lines
 
-**Implementation Plan**: See [DEBUG_METADATA_PLAN.md](DEBUG_METADATA_PLAN.md) for detailed task breakdown (~3.5 days of work)
+**Implementation Plan**: See [../archive/DEBUG_METADATA_PLAN.md](../archive/DEBUG_METADATA_PLAN.md) for detailed task breakdown (~3.5 days of work)
 
 ### What This Enables
 

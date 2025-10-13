@@ -163,15 +163,12 @@ just build-runtime
 ## Documentation
 
 ### Planning Docs
-- `docs/SCHEDULER_IMPLEMENTATION.md` - Overall scheduler roadmap
-- `docs/X86_64_LINUX_CONTEXT_PLAN.md` - x86-64 context plan ✅
-- `docs/LINUX_EPOLL_PLAN.md` - epoll plan ✅
+- `../architecture/SCHEDULER_IMPLEMENTATION.md` - Overall scheduler roadmap
+- `../archive/X86_64_LINUX_CONTEXT_PLAN.md` - x86-64 context plan ✅
+- `../archive/LINUX_EPOLL_PLAN.md` - epoll plan ✅
 
 ### Implementation Results
-- `X86_64_IMPLEMENTATION_COMPLETE.md` - Context switching results ✅
-- `EPOLL_IMPLEMENTATION_COMPLETE.md` - epoll results ✅
-- `docs/CONTEXT_SWITCHING_COMPARISON.md` - ARM64 vs x86-64 analysis ✅
-- `TEST_FIXES.md` - Test infrastructure notes ✅
+- `../archive/CONTEXT_SWITCHING_COMPARISON.md` - ARM64 vs x86-64 analysis ✅
 
 ### Code Comments
 - `runtime/context_arm64.s` - 133 lines, heavily commented
