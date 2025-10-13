@@ -30,7 +30,7 @@
  * - runtime_error if not in a strand context
  * - runtime_error on I/O errors (other than EAGAIN/EWOULDBLOCK)
  */
-StackCell* write_line(StackCell* stack);
+StackCell *write_line(StackCell *stack);
 
 /**
  * Read a line from stdin
@@ -48,6 +48,6 @@ StackCell* write_line(StackCell* stack);
  * - runtime_error on I/O errors (other than EAGAIN/EWOULDBLOCK)
  * - Pushes empty string on EOF
  */
-StackCell* read_line(StackCell* stack);
+StackCell *read_line(StackCell *stack);
 
 #endif // CEM_RUNTIME_IO_H

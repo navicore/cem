@@ -1,3 +1,5 @@
+#[cfg(test)]
+use crate::ast::SourceLoc;
 /**
 Core type checker for Cem
 
@@ -5,8 +7,6 @@ Implements bidirectional type checking with stack effect inference.
 */
 use crate::ast::types::{Effect, StackType, Type};
 use crate::ast::{Expr, MatchBranch, Pattern, Program, WordDef};
-#[cfg(test)]
-use crate::ast::SourceLoc;
 use crate::typechecker::environment::Environment;
 use crate::typechecker::errors::{TypeError, TypeResult};
 use crate::typechecker::unification::{unify_stack_types, unify_types};
@@ -138,7 +138,6 @@ impl TypeChecker {
 
                 Ok(then_stack)
             }
-
         }
     }
 
@@ -156,11 +155,11 @@ impl TypeChecker {
         let stack_depth = stack.depth().unwrap_or(0);
 
         if stack_depth < input_depth {
-            return Err(TypeError::StackUnderflow {
+            return Err(Box::new(TypeError::StackUnderflow {
                 word: word_name.to_string(),
                 required: input_depth,
                 available: stack_depth,
-            });
+            }));
         }
 
         // For simple case: try unification
@@ -174,11 +173,11 @@ impl TypeChecker {
                 consumed.push(top);
                 remaining_stack = rest;
             } else {
-                return Err(TypeError::StackUnderflow {
+                return Err(Box::new(TypeError::StackUnderflow {
                     word: word_name.to_string(),
                     required: input_depth,
                     available: consumed.len(),
-                });
+                }));
             }
         }
 
@@ -193,7 +192,7 @@ impl TypeChecker {
             })?;
 
         // Apply substitution to outputs
-        let output_stack = self.apply_type_substitution(&effect.outputs, &type_subst);
+        let output_stack = Self::apply_type_substitution(&effect.outputs, &type_subst);
 
         // Rebuild stack: remaining + outputs
         let mut result = remaining_stack;
@@ -213,15 +212,14 @@ impl TypeChecker {
 
     /// Apply type substitution to a stack type
     fn apply_type_substitution(
-        &self,
         stack: &StackType,
         subst: &crate::typechecker::unification::Substitution,
     ) -> StackType {
         match stack {
             StackType::Empty => StackType::Empty,
             StackType::Cons { rest, top } => {
-                let new_rest = self.apply_type_substitution(rest, subst);
-                let new_top = self.apply_type_subst_to_type(top, subst);
+                let new_rest = Self::apply_type_substitution(rest, subst);
+                let new_top = Self::apply_type_subst_to_type(top, subst);
                 new_rest.push(new_top)
             }
             StackType::RowVar(name) => {
@@ -233,7 +231,6 @@ impl TypeChecker {
 
     /// Apply type substitution to a type
     fn apply_type_subst_to_type(
-        &self,
         ty: &Type,
         subst: &crate::typechecker::unification::Substitution,
     ) -> Type {
@@ -243,7 +240,7 @@ impl TypeChecker {
                 name: name.clone(),
                 args: args
                     .iter()
-                    .map(|arg| self.apply_type_subst_to_type(arg, subst))
+                    .map(|arg| Self::apply_type_subst_to_type(arg, subst))
                     .collect(),
             },
             Type::Quotation(eff) => {
@@ -257,9 +254,9 @@ impl TypeChecker {
     /// Type check a pattern match
     fn check_match(&self, branches: &[MatchBranch], stack: StackType) -> TypeResult<StackType> {
         if branches.is_empty() {
-            return Err(TypeError::Other {
+            return Err(Box::new(TypeError::Other {
                 message: "Empty pattern match".to_string(),
-            });
+            }));
         }
 
         // Pop the scrutinee from stack
@@ -274,9 +271,9 @@ impl TypeChecker {
         let type_name = match &scrutinee_type {
             Type::Named { name, .. } => name.clone(),
             _ => {
-                return Err(TypeError::Other {
+                return Err(Box::new(TypeError::Other {
                     message: format!("Cannot pattern match on non-ADT type: {}", scrutinee_type),
-                })
+                }));
             }
         };
 
@@ -302,10 +299,10 @@ impl TypeChecker {
             .collect();
 
         if !missing.is_empty() {
-            return Err(TypeError::NonExhaustiveMatch {
+            return Err(Box::new(TypeError::NonExhaustiveMatch {
                 type_name: type_name.clone(),
                 missing_variants: missing,
-            });
+            }));
         }
 
         // Type check each branch and verify they all produce same effect
@@ -319,7 +316,7 @@ impl TypeChecker {
                     Pattern::Variant { name } => v.name == *name,
                 })
                 .ok_or_else(|| TypeError::Other {
-                    message: format!("Unknown variant in pattern"),
+                    message: "Unknown variant in pattern".to_string(),
                 })?;
 
             // Pattern destructures: push variant fields onto stack
@@ -388,7 +385,10 @@ mod tests {
         let stack = StackType::empty().push(Type::Int);
 
         // Call dup
-        let result = checker.check_expr(&Expr::WordCall("dup".to_string(), SourceLoc::unknown()), stack);
+        let result = checker.check_expr(
+            &Expr::WordCall("dup".to_string(), SourceLoc::unknown()),
+            stack,
+        );
         if let Err(e) = &result {
             eprintln!("Error: {:?}", e);
         }
@@ -402,9 +402,12 @@ mod tests {
         let checker = TypeChecker::new();
         let stack = StackType::empty();
 
-        let result = checker.check_expr(&Expr::WordCall("unknown".to_string(), SourceLoc::unknown()), stack);
+        let result = checker.check_expr(
+            &Expr::WordCall("unknown".to_string(), SourceLoc::unknown()),
+            stack,
+        );
         assert!(result.is_err());
-        match result.unwrap_err() {
+        match *result.unwrap_err() {
             TypeError::UndefinedWord { name } => assert_eq!(name, "unknown"),
             _ => panic!("Expected UndefinedWord error"),
         }
@@ -416,9 +419,12 @@ mod tests {
         let stack = StackType::empty(); // Empty stack
 
         // Try to call + which needs 2 ints
-        let result = checker.check_expr(&Expr::WordCall("+".to_string(), SourceLoc::unknown()), stack);
+        let result = checker.check_expr(
+            &Expr::WordCall("+".to_string(), SourceLoc::unknown()),
+            stack,
+        );
         assert!(result.is_err());
-        match result.unwrap_err() {
+        match *result.unwrap_err() {
             TypeError::StackUnderflow { .. } => (),
             e => panic!("Expected StackUnderflow, got {:?}", e),
         }

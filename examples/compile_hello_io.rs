@@ -1,19 +1,16 @@
+use cemc::ast::types::{Effect, StackType, Type};
 /**
  * Temporary program to compile hello_io.cem
  * Manually constructs AST for: : main ( -- ) "Hello, World!" write_line ;
  */
-
-use cem::ast::{Expr, Program, SourceLoc, WordDef};
-use cem::ast::types::{Effect, StackType, Type};
-use cem::codegen::{CodeGen, link_program};
+use cemc::ast::{Expr, Program, SourceLoc, WordDef};
+use cemc::codegen::{CodeGen, link_program};
 use std::process::Command;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Build runtime first
     println!("Building runtime with I/O support...");
-    let status = Command::new("just")
-        .arg("build-runtime")
-        .status()?;
+    let status = Command::new("just").arg("build-runtime").status()?;
 
     if !status.success() {
         return Err("Failed to build runtime".into());

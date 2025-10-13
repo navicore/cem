@@ -21,8 +21,8 @@
 #ifndef CEM_RUNTIME_CONTEXT_H
 #define CEM_RUNTIME_CONTEXT_H
 
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
 
 // ============================================================================
 // Platform Detection
@@ -30,29 +30,30 @@
 
 // Detect architecture
 #if defined(__aarch64__) || defined(__arm64__)
-    #define CEM_ARCH_ARM64
+#define CEM_ARCH_ARM64
 #elif defined(__x86_64__) || defined(__amd64__)
-    #define CEM_ARCH_X86_64
+#define CEM_ARCH_X86_64
 #else
-    #error "Unsupported architecture. Supported: ARM64, x86-64"
+#error "Unsupported architecture. Supported: ARM64, x86-64"
 #endif
 
 // Detect OS
 #if defined(__APPLE__) && defined(__MACH__)
-    #define CEM_OS_MACOS
+#define CEM_OS_MACOS
 #elif defined(__linux__)
-    #define CEM_OS_LINUX
+#define CEM_OS_LINUX
 #else
-    #error "Unsupported OS. Supported: macOS, Linux"
+#error "Unsupported OS. Supported: macOS, Linux"
 #endif
 
 // Check implementation status
 #if defined(CEM_ARCH_ARM64) && defined(CEM_OS_MACOS)
-    #define CEM_CONTEXT_IMPLEMENTED
+#define CEM_CONTEXT_IMPLEMENTED
 #elif defined(CEM_ARCH_X86_64) && defined(CEM_OS_LINUX)
-    #define CEM_CONTEXT_IMPLEMENTED
+#define CEM_CONTEXT_IMPLEMENTED
 #else
-    #error "Context switching not yet implemented for this platform. Currently implemented: ARM64 macOS, x86-64 Linux"
+#error                                                                         \
+    "Context switching not yet implemented for this platform. Currently implemented: ARM64 macOS, x86-64 Linux"
 #endif
 
 // ============================================================================
@@ -82,11 +83,12 @@
  * Size: 13*8 + 8*8 = 104 + 64 = 168 bytes
  */
 typedef struct {
-    uint64_t x19, x20, x21, x22, x23, x24, x25, x26, x27, x28;  // Callee-saved GPRs
-    uint64_t x29;  // Frame pointer
-    uint64_t x30;  // Link register
-    uint64_t sp;   // Stack pointer
-    double   d8, d9, d10, d11, d12, d13, d14, d15;  // Callee-saved FP registers
+  uint64_t x19, x20, x21, x22, x23, x24, x25, x26, x27,
+      x28;                                     // Callee-saved GPRs
+  uint64_t x29;                                // Frame pointer
+  uint64_t x30;                                // Link register
+  uint64_t sp;                                 // Stack pointer
+  double d8, d9, d10, d11, d12, d13, d14, d15; // Callee-saved FP registers
 } cem_context_t;
 
 #elif defined(CEM_ARCH_X86_64)
@@ -105,15 +107,15 @@ typedef struct {
  * Size: 7*8 = 56 bytes
  */
 typedef struct {
-    uint64_t rbx;
-    uint64_t rbp;
-    uint64_t r12;
-    uint64_t r13;
-    uint64_t r14;
-    uint64_t r15;
-    uint64_t rsp;
-    uint32_t mxcsr;  // FP control/status register
-    uint32_t _padding;
+  uint64_t rbx;
+  uint64_t rbp;
+  uint64_t r12;
+  uint64_t r13;
+  uint64_t r14;
+  uint64_t r15;
+  uint64_t rsp;
+  uint32_t mxcsr; // FP control/status register
+  uint32_t _padding;
 } cem_context_t;
 
 #endif
@@ -128,9 +130,9 @@ typedef struct {
  * ARM64 uses 'sp', x86-64 uses 'rsp'. This macro provides a uniform interface.
  */
 #ifdef CEM_ARCH_ARM64
-    #define CEM_CONTEXT_GET_SP(ctx) ((ctx)->sp)
+#define CEM_CONTEXT_GET_SP(ctx) ((ctx)->sp)
 #elif defined(CEM_ARCH_X86_64)
-    #define CEM_CONTEXT_GET_SP(ctx) ((ctx)->rsp)
+#define CEM_CONTEXT_GET_SP(ctx) ((ctx)->rsp)
 #endif
 
 // ============================================================================
@@ -168,7 +170,8 @@ typedef struct {
  * If stack usage exceeds this percentage of total size, growth is triggered
  * at the next checkpoint even if free space is above CEM_MIN_FREE_STACK.
  *
- * 75% provides a good balance between memory efficiency and preventing overflow.
+ * 75% provides a good balance between memory efficiency and preventing
+ * overflow.
  */
 #define CEM_STACK_GROWTH_THRESHOLD_PERCENT 75
 
@@ -209,13 +212,14 @@ typedef struct {
  * @param save_ctx - Where to save current context
  * @param restore_ctx - Context to restore and switch to
  */
-void cem_swapcontext(cem_context_t* save_ctx, const cem_context_t* restore_ctx);
+void cem_swapcontext(cem_context_t *save_ctx, const cem_context_t *restore_ctx);
 
 /**
  * Initialize a context for a new strand
  *
  * INTERNAL API: This function should ONLY be called from strand_spawn().
- * Direct calls from user code are not supported and may cause undefined behavior.
+ * Direct calls from user code are not supported and may cause undefined
+ * behavior.
  *
  * This sets up a context to start executing `func` with the given
  * stack. When `func` returns, control passes to `return_func`.
@@ -225,21 +229,19 @@ void cem_swapcontext(cem_context_t* save_ctx, const cem_context_t* restore_ctx);
  * @param ctx - Context to initialize (must be non-NULL)
  * @param stack_base - Starting address of the C stack allocation (low address).
  *                     NOTE: Despite the name "base", this is the LOW address
- *                     of the stack memory. On ARM64/x86-64, stacks grow downward,
- *                     so the stack pointer will be set to (stack_base + stack_size)
- *                     which is the high address. Must be non-NULL.
- * @param stack_size - Size of the C stack in bytes (minimum CEM_MIN_STACK_SIZE).
- *                     Must be positive.
- * @param func - Function to execute (receives no args, returns void). Must be non-NULL.
- * @param return_func - Function to call when func returns. Currently unused because
- *                      strand_spawn() uses strand_entry_trampoline which handles
- *                      cleanup. This parameter exists for potential future use.
+ *                     of the stack memory. On ARM64/x86-64, stacks grow
+ * downward, so the stack pointer will be set to (stack_base + stack_size) which
+ * is the high address. Must be non-NULL.
+ * @param stack_size - Size of the C stack in bytes (minimum
+ * CEM_MIN_STACK_SIZE). Must be positive.
+ * @param func - Function to execute (receives no args, returns void). Must be
+ * non-NULL.
+ * @param return_func - Function to call when func returns. Currently unused
+ * because strand_spawn() uses strand_entry_trampoline which handles cleanup.
+ * This parameter exists for potential future use.
  */
-void cem_makecontext(cem_context_t* ctx,
-                     void* stack_base,
-                     size_t stack_size,
-                     void (*func)(void),
-                     void (*return_func)(void));
+void cem_makecontext(cem_context_t *ctx, void *stack_base, size_t stack_size,
+                     void (*func)(void), void (*return_func)(void));
 
 // ============================================================================
 // Platform-Specific Notes

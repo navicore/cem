@@ -26,7 +26,6 @@ entry:
 }
 ```
 */
-
 pub mod error;
 pub mod ir;
 pub mod linker;
@@ -35,9 +34,9 @@ pub use error::{CodegenError, CodegenResult};
 pub use ir::IRGenerator;
 pub use linker::{compile_to_object, link_program};
 
-use crate::ast::{Expr, Program, WordDef};
 #[cfg(test)]
 use crate::ast::SourceLoc;
+use crate::ast::{Expr, Program, WordDef};
 use std::fmt::Write as _;
 use std::process::Command;
 
@@ -45,7 +44,7 @@ use std::process::Command;
 pub struct CodeGen {
     output: String,
     temp_counter: usize,
-    current_block: String,  // Track the current basic block label we're emitting into
+    current_block: String, // Track the current basic block label we're emitting into
     metadata_counter: usize, // Counter for debug metadata IDs
     file_metadata: std::collections::HashMap<String, usize>, // filename -> metadata ID
     compile_unit_id: Option<usize>, // ID of the DICompileUnit metadata node
@@ -110,13 +109,16 @@ impl CodeGen {
     /// # Arguments
     /// * `program` - The AST program to compile
     /// * `entry_word` - Optional name of word to call from main(). If None, no main() is generated.
-    ///                  If Some("word_name"), generates main() that calls that word and prints result.
-    pub fn compile_program_with_main(&mut self, program: &Program, entry_word: Option<&str>) -> CodegenResult<String> {
+    ///   If Some("word_name"), generates main() that calls that word and prints result.
+    pub fn compile_program_with_main(
+        &mut self,
+        program: &Program,
+        entry_word: Option<&str>,
+    ) -> CodegenResult<String> {
         // Emit module header
         writeln!(&mut self.output, "; Cem Compiler - Generated LLVM IR")
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
-        writeln!(&mut self.output)
-            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output).map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
         // Note: We intentionally omit the target triple to let clang use its default.
         // This avoids "overriding the module target triple" warnings that occur when
@@ -149,7 +151,7 @@ impl CodeGen {
 
         Ok(self.output.clone())
     }
-    
+
     /// Get the target triple by querying clang
     ///
     /// Note: Currently unused. We intentionally omit target triple from IR
@@ -164,17 +166,12 @@ impl CodeGen {
     /// Returns an error if clang is not found or fails to report its target
     #[allow(dead_code)]
     fn get_target_triple() -> Result<String, std::io::Error> {
-        let output = Command::new("clang")
-            .arg("-dumpmachine")
-            .output()?;
+        let output = Command::new("clang").arg("-dumpmachine").output()?;
 
         if output.status.success() {
             Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
         } else {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "clang -dumpmachine failed"
-            ))
+            Err(std::io::Error::other("clang -dumpmachine failed"))
         }
     }
 
@@ -249,8 +246,7 @@ impl CodeGen {
         writeln!(&mut self.output, "declare void @free_stack(ptr)")
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
-        writeln!(&mut self.output)
-            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output).map_err(|e| CodegenError::InternalError(e.to_string()))?;
         Ok(())
     }
 
@@ -286,8 +282,12 @@ impl CodeGen {
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
         // Spawn entry word as a strand
-        writeln!(&mut self.output, "  call i64 @strand_spawn(ptr @{}, ptr null)", function_name)
-            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(
+            &mut self.output,
+            "  call i64 @strand_spawn(ptr @{}, ptr null)",
+            function_name
+        )
+        .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
         // Run scheduler (returns final stack from main strand)
         writeln!(&mut self.output, "  %stack = call ptr @scheduler_run()")
@@ -303,19 +303,19 @@ impl CodeGen {
 
         writeln!(&mut self.output, "  ret i32 0")
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
-        writeln!(&mut self.output, "}}")
-            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
-        writeln!(&mut self.output)
-            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output, "}}").map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output).map_err(|e| CodegenError::InternalError(e.to_string()))?;
         Ok(())
     }
 
     /// Emit debug info header: DIFile nodes for each source file
-    fn emit_debug_info_header(&mut self, source_files: &std::collections::HashSet<&str>) -> CodegenResult<()> {
+    fn emit_debug_info_header(
+        &mut self,
+        source_files: &std::collections::HashSet<&str>,
+    ) -> CodegenResult<()> {
         writeln!(&mut self.output, "; Debug Information")
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
-        writeln!(&mut self.output)
-            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output).map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
         // Emit DIFile for each unique source file
         for filename in source_files {
@@ -326,7 +326,10 @@ impl CodeGen {
             let path = std::path::Path::new(filename);
             let (directory, basename) = if let Some(parent) = path.parent() {
                 let dir = parent.to_string_lossy();
-                let base = path.file_name().map(|s| s.to_string_lossy()).unwrap_or_default();
+                let base = path
+                    .file_name()
+                    .map(|s| s.to_string_lossy())
+                    .unwrap_or_default();
                 (dir.to_string(), base.to_string())
             } else {
                 (".".to_string(), filename.to_string())
@@ -336,14 +339,15 @@ impl CodeGen {
             let escaped_basename = basename.replace('\\', r"\\").replace('"', r#"\""#);
             let escaped_directory = directory.replace('\\', r"\\").replace('"', r#"\""#);
 
-            writeln!(&mut self.output,
+            writeln!(
+                &mut self.output,
                 "!{} = !DIFile(filename: \"{}\", directory: \"{}\")",
                 metadata_id, escaped_basename, escaped_directory
-            ).map_err(|e| CodegenError::InternalError(e.to_string()))?;
+            )
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
         }
 
-        writeln!(&mut self.output)
-            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output).map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
         Ok(())
     }
@@ -360,8 +364,12 @@ impl CodeGen {
         // For empty programs, create a placeholder file
         let main_file_id = if self.file_metadata.is_empty() {
             let placeholder_id = self.fresh_metadata_id();
-            writeln!(&mut self.output, "!{} = !DIFile(filename: \"<empty>\", directory: \".\")", placeholder_id)
-                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+            writeln!(
+                &mut self.output,
+                "!{} = !DIFile(filename: \"<empty>\", directory: \".\")",
+                placeholder_id
+            )
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
             placeholder_id
         } else {
             // Use the file with the smallest ID for determinism
@@ -374,8 +382,7 @@ impl CodeGen {
         ).map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
         // Emit DISubprogram for each word
-        writeln!(&mut self.output)
-            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output).map_err(|e| CodegenError::InternalError(e.to_string()))?;
         writeln!(&mut self.output, "; DISubprogram metadata for each word")
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
@@ -384,7 +391,9 @@ impl CodeGen {
             .map(|_| self.fresh_metadata_id())
             .collect();
 
-        for (i, (word_name, file_id, line, subprogram_id)) in self.word_subprograms.iter().enumerate() {
+        for (i, (word_name, file_id, line, subprogram_id)) in
+            self.word_subprograms.iter().enumerate()
+        {
             let type_id = type_ids[i];
             writeln!(&mut self.output,
                 "!{} = distinct !DISubprogram(name: \"{}\", scope: !{}, file: !{}, line: {}, type: !{}, scopeLine: {}, flags: DIFlagPrototyped, spFlags: DISPFlagDefinition, unit: !{})",
@@ -393,19 +402,21 @@ impl CodeGen {
         }
 
         // Emit stub type metadata for each function type
-        writeln!(&mut self.output)
-            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output).map_err(|e| CodegenError::InternalError(e.to_string()))?;
         writeln!(&mut self.output, "; Type metadata (stubs)")
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
         for type_id in type_ids {
-            writeln!(&mut self.output, "!{} = !DISubroutineType(types: !{{}})", type_id)
-                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+            writeln!(
+                &mut self.output,
+                "!{} = !DISubroutineType(types: !{{}})",
+                type_id
+            )
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
         }
 
         // Emit DILocation metadata for each source location
         if !self.debug_locations.is_empty() {
-            writeln!(&mut self.output)
-                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+            writeln!(&mut self.output).map_err(|e| CodegenError::InternalError(e.to_string()))?;
             writeln!(&mut self.output, "; DILocation metadata")
                 .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
@@ -414,27 +425,31 @@ impl CodeGen {
             locations.sort_by_key(|(_, loc_id)| *loc_id);
 
             for ((_file_id, line, column, scope_id), loc_id) in locations {
-                writeln!(&mut self.output,
+                writeln!(
+                    &mut self.output,
                     "!{} = !DILocation(line: {}, column: {}, scope: !{})",
                     loc_id, line, column, scope_id
-                ).map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                )
+                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
             }
         }
 
         // Emit module flags for debug info
-        writeln!(&mut self.output)
-            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output).map_err(|e| CodegenError::InternalError(e.to_string()))?;
         writeln!(&mut self.output, "!llvm.dbg.cu = !{{!{}}}", cu_id)
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
         let flags_id = self.fresh_metadata_id();
         writeln!(&mut self.output, "!llvm.module.flags = !{{!{}}}", flags_id)
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
-        writeln!(&mut self.output, "!{} = !{{i32 2, !\"Debug Info Version\", i32 3}}", flags_id)
-            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(
+            &mut self.output,
+            "!{} = !{{i32 2, !\"Debug Info Version\", i32 3}}",
+            flags_id
+        )
+        .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
-        writeln!(&mut self.output)
-            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output).map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
         Ok(())
     }
@@ -485,17 +500,14 @@ impl CodeGen {
         let subprogram_id = self.fresh_metadata_id();
 
         // Get the file metadata ID for this word's source location
-        let file_id = self.file_metadata
+        let file_id = self
+            .file_metadata
             .get(word.loc.file.as_ref())
             .copied()
             .unwrap_or(0);
 
-        self.word_subprograms.push((
-            word.name.clone(),
-            file_id,
-            word.loc.line,
-            subprogram_id,
-        ));
+        self.word_subprograms
+            .push((word.name.clone(), file_id, word.loc.line, subprogram_id));
 
         Ok(subprogram_id)
     }
@@ -519,8 +531,12 @@ impl CodeGen {
         };
 
         // Emit function definition with debug metadata attachment
-        writeln!(&mut self.output, "define ptr @{}(ptr %stack) !dbg !{} {{", function_name, subprogram_id)
-            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(
+            &mut self.output,
+            "define ptr @{}(ptr %stack) !dbg !{} {{",
+            function_name, subprogram_id
+        )
+        .map_err(|e| CodegenError::InternalError(e.to_string()))?;
         writeln!(&mut self.output, "entry:")
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
@@ -537,10 +553,8 @@ impl CodeGen {
         writeln!(&mut self.output, "  ret ptr %{}", stack_var)
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
-        writeln!(&mut self.output, "}}")
-            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
-        writeln!(&mut self.output)
-            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output, "}}").map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output).map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
         // Clear current subprogram
         self.current_subprogram_id = None;
@@ -553,7 +567,11 @@ impl CodeGen {
     ///
     /// ends_with_musttail is true if the last expression in the quotation
     /// is a WordCall in tail position (which will be compiled as a musttail call)
-    fn compile_branch_quotation(&mut self, quot: &Expr, initial_stack: &str) -> CodegenResult<(String, bool)> {
+    fn compile_branch_quotation(
+        &mut self,
+        quot: &Expr,
+        initial_stack: &str,
+    ) -> CodegenResult<(String, bool)> {
         match quot {
             Expr::Quotation(exprs, _loc) => {
                 let mut stack_var = initial_stack.to_string();
@@ -567,27 +585,30 @@ impl CodeGen {
                 let mut ends_with_musttail = false;
 
                 for (i, expr) in exprs.iter().enumerate() {
-                    let is_tail = i == len - 1;  // Track tail position in branch
+                    let is_tail = i == len - 1; // Track tail position in branch
                     stack_var = self.compile_expr_with_context(expr, &stack_var, is_tail)?;
 
                     // Check if the last expression is a WordCall in tail position
                     // (which compile_expr_with_context will compile as a musttail call)
-                    if is_tail {
-                        if let Expr::WordCall(_, _) = expr {
-                            ends_with_musttail = true;
-                        }
+                    if is_tail && let Expr::WordCall(_, _) = expr {
+                        ends_with_musttail = true;
                     }
                 }
                 Ok((stack_var, ends_with_musttail))
             }
             _ => Err(CodegenError::InternalError(
-                "If branches must be quotations".to_string()
-            ))
+                "If branches must be quotations".to_string(),
+            )),
         }
     }
 
     /// Compile a single expression with tail-call context
-    fn compile_expr_with_context(&mut self, expr: &Expr, stack: &str, in_tail_position: bool) -> CodegenResult<String> {
+    fn compile_expr_with_context(
+        &mut self,
+        expr: &Expr,
+        stack: &str,
+        in_tail_position: bool,
+    ) -> CodegenResult<String> {
         match expr {
             // Tail-call optimization: if in tail position and calling a word, use musttail
             Expr::WordCall(name, loc) if in_tail_position => {
@@ -602,7 +623,7 @@ impl CodeGen {
                 Ok(result)
             }
             // Otherwise, delegate to normal compile_expr
-            _ => self.compile_expr(expr, stack)
+            _ => self.compile_expr(expr, stack),
         }
     }
 
@@ -641,7 +662,7 @@ impl CodeGen {
                 // Length is original byte count - escaping is just text representation.
                 // E.g., "a\"b" is 3 bytes even though we write it as 5 chars in IR text.
                 // UTF-8 chars like "😀" (4 bytes) escape to "\F0\9F\98\80" but still represent 4 bytes.
-                let str_len = s.as_bytes().len() + 1; // +1 for null terminator
+                let str_len = s.len() + 1; // +1 for null terminator
 
                 // Emit global at top of file (we'll prepend it later)
                 let global_decl = format!(
@@ -707,11 +728,9 @@ impl CodeGen {
                     stack_var = self.compile_expr_with_context(expr, &stack_var, is_tail)?;
 
                     // If last expression is a musttail call, return its result
-                    if is_tail {
-                        if let Expr::WordCall(_, _) = expr {
-                            writeln!(&mut self.output, "  ret ptr %{}", stack_var)
-                                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
-                        }
+                    if is_tail && let Expr::WordCall(_, _) = expr {
+                        writeln!(&mut self.output, "  ret ptr %{}", stack_var)
+                            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
                     }
                 }
 
@@ -748,7 +767,11 @@ impl CodeGen {
                 feature: "pattern matching".to_string(),
             }),
 
-            Expr::If { then_branch, else_branch, loc: _ } => {
+            Expr::If {
+                then_branch,
+                else_branch,
+                loc: _,
+            } => {
                 // Stack top must be a Bool
                 // Strategy: extract bool, branch to then/else, both produce same stack effect
 
@@ -772,13 +795,21 @@ impl CodeGen {
                 writeln!(&mut self.output, "  %{} = getelementptr inbounds {{ i32, [4 x i8], [16 x i8], ptr }}, ptr %{}, i32 0, i32 2, i32 0", bool_ptr, stack)
                     .map_err(|e| CodegenError::InternalError(e.to_string()))?;
                 let bool_val = self.fresh_temp();
-                writeln!(&mut self.output, "  %{} = load i8, ptr %{}", bool_val, bool_ptr)
-                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                writeln!(
+                    &mut self.output,
+                    "  %{} = load i8, ptr %{}",
+                    bool_val, bool_ptr
+                )
+                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
                 // Use fresh temp for cond to avoid collisions in nested ifs
                 let cond_var = self.fresh_temp();
-                writeln!(&mut self.output, "  %{} = trunc i8 %{} to i1", cond_var, bool_val)
-                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                writeln!(
+                    &mut self.output,
+                    "  %{} = trunc i8 %{} to i1",
+                    cond_var, bool_val
+                )
+                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
                 // Get rest of stack (next pointer at field index 3)
                 let rest_ptr = self.fresh_temp();
@@ -787,18 +818,27 @@ impl CodeGen {
 
                 // Use fresh temp for rest to avoid collisions in nested ifs
                 let rest_var = self.fresh_temp();
-                writeln!(&mut self.output, "  %{} = load ptr, ptr %{}", rest_var, rest_ptr)
-                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                writeln!(
+                    &mut self.output,
+                    "  %{} = load ptr, ptr %{}",
+                    rest_var, rest_ptr
+                )
+                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
                 // Branch using the condition variable
-                writeln!(&mut self.output, "  br i1 %{}, label %{}, label %{}", cond_var, then_label, else_label)
-                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                writeln!(
+                    &mut self.output,
+                    "  br i1 %{}, label %{}, label %{}",
+                    cond_var, then_label, else_label
+                )
+                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
                 // Then branch
                 writeln!(&mut self.output, "{}:", then_label)
                     .map_err(|e| CodegenError::InternalError(e.to_string()))?;
                 self.current_block = then_label.clone();
-                let (then_stack, then_is_musttail) = self.compile_branch_quotation(then_branch, &rest_var)?;
+                let (then_stack, then_is_musttail) =
+                    self.compile_branch_quotation(then_branch, &rest_var)?;
 
                 // Capture the actual block that will branch to merge (after any nested ifs)
                 let then_predecessor = self.current_block.clone();
@@ -816,7 +856,8 @@ impl CodeGen {
                 writeln!(&mut self.output, "{}:", else_label)
                     .map_err(|e| CodegenError::InternalError(e.to_string()))?;
                 self.current_block = else_label.clone();
-                let (else_stack, else_is_musttail) = self.compile_branch_quotation(else_branch, &rest_var)?;
+                let (else_stack, else_is_musttail) =
+                    self.compile_branch_quotation(else_branch, &rest_var)?;
 
                 // Capture the actual block that will branch to merge (after any nested ifs)
                 let else_predecessor = self.current_block.clone();
@@ -840,19 +881,28 @@ impl CodeGen {
                     let result = self.fresh_temp();
                     if !then_is_musttail && !else_is_musttail {
                         // Both branches merge - use actual predecessors
-                        writeln!(&mut self.output, "  %{} = phi ptr [ %{}, %{} ], [ %{}, %{} ]",
-                            result, then_stack, then_predecessor, else_stack, else_predecessor)
-                            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                        writeln!(
+                            &mut self.output,
+                            "  %{} = phi ptr [ %{}, %{} ], [ %{}, %{} ]",
+                            result, then_stack, then_predecessor, else_stack, else_predecessor
+                        )
+                        .map_err(|e| CodegenError::InternalError(e.to_string()))?;
                     } else if !then_is_musttail {
                         // Only then branch merges (else returned)
-                        writeln!(&mut self.output, "  %{} = phi ptr [ %{}, %{} ]",
-                            result, then_stack, then_predecessor)
-                            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                        writeln!(
+                            &mut self.output,
+                            "  %{} = phi ptr [ %{}, %{} ]",
+                            result, then_stack, then_predecessor
+                        )
+                        .map_err(|e| CodegenError::InternalError(e.to_string()))?;
                     } else {
                         // Only else branch merges (then returned)
-                        writeln!(&mut self.output, "  %{} = phi ptr [ %{}, %{} ]",
-                            result, else_stack, else_predecessor)
-                            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                        writeln!(
+                            &mut self.output,
+                            "  %{} = phi ptr [ %{}, %{} ]",
+                            result, else_stack, else_predecessor
+                        )
+                        .map_err(|e| CodegenError::InternalError(e.to_string()))?;
                     }
                     Ok(result)
                 } else {
@@ -861,7 +911,6 @@ impl CodeGen {
                     Ok(then_stack) // Won't be used since both branches returned
                 }
             }
-
         }
     }
 
@@ -963,8 +1012,10 @@ mod tests {
 
         // Verify that target triple is NOT present in the IR
         // We intentionally omit it to let clang use its default and avoid warnings
-        assert!(!ir.contains("target triple"),
-            "IR should not contain target triple declaration");
+        assert!(
+            !ir.contains("target triple"),
+            "IR should not contain target triple declaration"
+        );
     }
 
     #[test]
@@ -979,11 +1030,14 @@ mod tests {
                 outputs: StackType::Empty.push(Type::Int),
             },
             body: vec![
-                Expr::Quotation(vec![
-                    Expr::IntLit(5, SourceLoc::unknown()),
-                    Expr::IntLit(10, SourceLoc::unknown()),
-                    Expr::WordCall("add".to_string(), SourceLoc::unknown()),
-                ], SourceLoc::unknown()),
+                Expr::Quotation(
+                    vec![
+                        Expr::IntLit(5, SourceLoc::unknown()),
+                        Expr::IntLit(10, SourceLoc::unknown()),
+                        Expr::WordCall("add".to_string(), SourceLoc::unknown()),
+                    ],
+                    SourceLoc::unknown(),
+                ),
                 Expr::WordCall("call_quotation".to_string(), SourceLoc::unknown()),
             ],
             loc: SourceLoc::unknown(),
@@ -997,13 +1051,25 @@ mod tests {
         let ir = codegen.compile_program(&program).unwrap();
 
         // Verify quotation function is generated
-        assert!(ir.contains("define ptr @quot_"), "Should generate quotation function");
+        assert!(
+            ir.contains("define ptr @quot_"),
+            "Should generate quotation function"
+        );
         // Verify quotation is pushed
-        assert!(ir.contains("call ptr @push_quotation"), "Should push quotation");
+        assert!(
+            ir.contains("call ptr @push_quotation"),
+            "Should push quotation"
+        );
         // Verify quotation contains the body
-        assert!(ir.contains("call ptr @push_int"), "Quotation should push integers");
+        assert!(
+            ir.contains("call ptr @push_int"),
+            "Quotation should push integers"
+        );
         assert!(ir.contains("call ptr @add"), "Quotation should call add");
         // Verify call_quotation is called
-        assert!(ir.contains("call ptr @call_quotation"), "Should call call_quotation");
+        assert!(
+            ir.contains("call ptr @call_quotation"),
+            "Should call call_quotation"
+        );
     }
 }

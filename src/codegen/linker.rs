@@ -6,7 +6,6 @@ This module handles:
 - Invoking clang with appropriate flags
 - Linking with C runtime
 */
-
 use super::{CodegenError, CodegenResult};
 use std::fs;
 use std::path::Path;
@@ -45,7 +44,7 @@ fn validate_path(path: &str) -> CodegenResult<()> {
 ///
 /// # Example
 /// ```no_run
-/// use cem::codegen::link_program;
+/// use cemc::codegen::link_program;
 ///
 /// let ir = "define ptr @main(ptr %stack) { ... }";
 /// link_program(ir, "runtime/libcem_runtime.a", "program").unwrap();
@@ -136,10 +135,7 @@ pub fn check_clang() -> CodegenResult<String> {
         .arg("--version")
         .output()
         .map_err(|e| CodegenError::LinkerError {
-            message: format!(
-                "clang not found. Please install LLVM/clang: {}",
-                e
-            ),
+            message: format!("clang not found. Please install LLVM/clang: {}", e),
         })?;
 
     let version = String::from_utf8_lossy(&output.stdout);

@@ -1,5 +1,5 @@
-use cem::parser::Parser;
-use cem::codegen::{CodeGen, link_program};
+use cemc::codegen::{CodeGen, link_program};
+use cemc::parser::Parser;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -41,14 +41,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Parse
     println!("Parsing {}...", input_file);
     let mut parser = Parser::new_with_filename(&source, input_file);
-    let program = parser.parse()
-        .map_err(|e| format!("Parse error: {}", e))?;
+    let program = parser.parse().map_err(|e| format!("Parse error: {}", e))?;
 
     // Build runtime first
     println!("Building runtime...");
-    let status = Command::new("just")
-        .arg("build-runtime")
-        .status()?;
+    let status = Command::new("just").arg("build-runtime").status()?;
 
     if !status.success() {
         return Err("Failed to build runtime".into());
@@ -63,7 +60,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let entry_word = if has_main {
         Some("main")
     } else if program.word_defs.len() == 1 {
-        println!("Note: Using '{}' as entry point (no 'main' word found)", program.word_defs[0].name);
+        println!(
+            "Note: Using '{}' as entry point (no 'main' word found)",
+            program.word_defs[0].name
+        );
         Some(program.word_defs[0].name.as_str())
     } else {
         eprintln!("Error: No 'main' word found and multiple words defined");

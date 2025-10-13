@@ -82,7 +82,7 @@ pub struct WordDef {
     pub name: String,
     pub effect: types::Effect,
     pub body: Vec<Expr>,
-    pub loc: SourceLoc,  // Location of the word definition (: word_name line)
+    pub loc: SourceLoc, // Location of the word definition (: word_name line)
 }
 
 /// Expression in the body of a word

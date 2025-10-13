@@ -1,21 +1,23 @@
+use cemc::ast::types::{Effect, StackType, Type};
 /**
 End-to-end integration test: Cem source → LLVM IR → executable
 */
-
-use cem::ast::{Expr, Program, SourceLoc, WordDef};
-use cem::ast::types::{Effect, StackType, Type};
-use cem::codegen::{CodeGen, compile_to_object, link_program};
+use cemc::ast::{Expr, Program, SourceLoc, WordDef};
+use cemc::codegen::{CodeGen, compile_to_object, link_program};
 use std::process::Command;
 
 #[test]
-#[cfg_attr(target_os = "linux", ignore = "Pre-existing test failure (not epoll-related)")]
+#[cfg_attr(
+    target_os = "linux",
+    ignore = "Pre-existing test failure (not epoll-related)"
+)]
 fn test_end_to_end_compilation() {
     // Build the runtime first
     let runtime_status = Command::new("just")
         .arg("build-runtime")
         .status()
         .expect("Failed to build runtime");
-    
+
     assert!(runtime_status.success(), "Runtime build failed");
 
     // Create a simple program: : fortytwo ( -- Int ) 42 ;
@@ -36,7 +38,9 @@ fn test_end_to_end_compilation() {
 
     // Generate LLVM IR
     let mut codegen = CodeGen::new();
-    let ir = codegen.compile_program(&program).expect("Failed to generate IR");
+    let ir = codegen
+        .compile_program(&program)
+        .expect("Failed to generate IR");
 
     // Verify IR contains expected elements
     assert!(ir.contains("define ptr @fortytwo"));
@@ -44,8 +48,7 @@ fn test_end_to_end_compilation() {
     assert!(ir.contains("i64 42"));
 
     // Compile to object file (tests that LLVM accepts our IR)
-    compile_to_object(&ir, "test_fortytwo")
-        .expect("Failed to compile IR to object");
+    compile_to_object(&ir, "test_fortytwo").expect("Failed to compile IR to object");
 
     // Clean up
     std::fs::remove_file("test_fortytwo.o").ok();
@@ -53,14 +56,17 @@ fn test_end_to_end_compilation() {
 }
 
 #[test]
-#[cfg_attr(target_os = "linux", ignore = "Pre-existing test failure (not epoll-related)")]
+#[cfg_attr(
+    target_os = "linux",
+    ignore = "Pre-existing test failure (not epoll-related)"
+)]
 fn test_arithmetic_compilation() {
     // Build runtime
     let runtime_status = Command::new("just")
         .arg("build-runtime")
         .status()
         .expect("Failed to build runtime");
-    
+
     assert!(runtime_status.success());
 
     // : eight ( -- Int ) 5 3 + ;
@@ -85,13 +91,14 @@ fn test_arithmetic_compilation() {
 
     // Generate and compile
     let mut codegen = CodeGen::new();
-    let ir = codegen.compile_program(&program).expect("Failed to generate IR");
+    let ir = codegen
+        .compile_program(&program)
+        .expect("Failed to generate IR");
 
     assert!(ir.contains("@eight"));
     assert!(ir.contains("@add"));
 
-    compile_to_object(&ir, "test_eight")
-        .expect("Failed to compile");
+    compile_to_object(&ir, "test_eight").expect("Failed to compile");
 
     // Clean up
     std::fs::remove_file("test_eight.o").ok();
@@ -99,7 +106,10 @@ fn test_arithmetic_compilation() {
 }
 
 #[test]
-#[cfg_attr(target_os = "linux", ignore = "Pre-existing test failure (not epoll-related)")]
+#[cfg_attr(
+    target_os = "linux",
+    ignore = "Pre-existing test failure (not epoll-related)"
+)]
 fn test_executable_with_main() {
     // Build runtime
     let runtime_status = Command::new("just")
@@ -127,7 +137,8 @@ fn test_executable_with_main() {
 
     // Generate IR with main() function
     let mut codegen = CodeGen::new();
-    let ir = codegen.compile_program_with_main(&program, Some("fortytwo"))
+    let ir = codegen
+        .compile_program_with_main(&program, Some("fortytwo"))
         .expect("Failed to generate IR");
 
     // Verify IR contains main function
@@ -137,8 +148,7 @@ fn test_executable_with_main() {
     assert!(ir.contains("ret i32 0"));
 
     // Link to produce executable
-    link_program(&ir, "runtime/libcem_runtime.a", "test_fortytwo_exe")
-        .expect("Failed to link");
+    link_program(&ir, "runtime/libcem_runtime.a", "test_fortytwo_exe").expect("Failed to link");
 
     // Run the executable
     let output = Command::new("./test_fortytwo_exe")
@@ -149,7 +159,11 @@ fn test_executable_with_main() {
 
     // Check that it printed 42
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("42"), "Expected output to contain 42, got: {}", stdout);
+    assert!(
+        stdout.contains("42"),
+        "Expected output to contain 42, got: {}",
+        stdout
+    );
 
     // Clean up
     std::fs::remove_file("test_fortytwo_exe").ok();
@@ -157,7 +171,10 @@ fn test_executable_with_main() {
 }
 
 #[test]
-#[cfg_attr(target_os = "linux", ignore = "Pre-existing test failure (not epoll-related)")]
+#[cfg_attr(
+    target_os = "linux",
+    ignore = "Pre-existing test failure (not epoll-related)"
+)]
 fn test_multiply_executable() {
     // Build runtime
     let runtime_status = Command::new("just")
@@ -189,11 +206,11 @@ fn test_multiply_executable() {
 
     // Generate and link
     let mut codegen = CodeGen::new();
-    let ir = codegen.compile_program_with_main(&program, Some("product"))
+    let ir = codegen
+        .compile_program_with_main(&program, Some("product"))
         .expect("Failed to generate IR");
 
-    link_program(&ir, "runtime/libcem_runtime.a", "test_product_exe")
-        .expect("Failed to link");
+    link_program(&ir, "runtime/libcem_runtime.a", "test_product_exe").expect("Failed to link");
 
     // Run and check output
     let output = Command::new("./test_product_exe")
@@ -210,7 +227,10 @@ fn test_multiply_executable() {
 }
 
 #[test]
-#[cfg_attr(target_os = "linux", ignore = "Pre-existing test failure (not epoll-related)")]
+#[cfg_attr(
+    target_os = "linux",
+    ignore = "Pre-existing test failure (not epoll-related)"
+)]
 fn test_if_expression() {
     // Build runtime
     let runtime_status = Command::new("just")
@@ -231,9 +251,15 @@ fn test_if_expression() {
         body: vec![
             Expr::BoolLit(true, SourceLoc::unknown()),
             Expr::If {
-                then_branch: Box::new(Expr::Quotation(vec![Expr::IntLit(42, SourceLoc::unknown())], SourceLoc::unknown())),
-                else_branch: Box::new(Expr::Quotation(vec![Expr::IntLit(0, SourceLoc::unknown())], SourceLoc::unknown())),
-            loc: SourceLoc::unknown(),
+                then_branch: Box::new(Expr::Quotation(
+                    vec![Expr::IntLit(42, SourceLoc::unknown())],
+                    SourceLoc::unknown(),
+                )),
+                else_branch: Box::new(Expr::Quotation(
+                    vec![Expr::IntLit(0, SourceLoc::unknown())],
+                    SourceLoc::unknown(),
+                )),
+                loc: SourceLoc::unknown(),
             },
         ],
         loc: SourceLoc::unknown(),
@@ -246,18 +272,18 @@ fn test_if_expression() {
 
     // Generate and link
     let mut codegen = CodeGen::new();
-    let ir = codegen.compile_program_with_main(&program, Some("test_if"))
+    let ir = codegen
+        .compile_program_with_main(&program, Some("test_if"))
         .expect("Failed to generate IR");
 
     // Verify IR contains if/then/else structure
-    assert!(ir.contains("br i1 %"));  // Branch on boolean condition
+    assert!(ir.contains("br i1 %")); // Branch on boolean condition
     assert!(ir.contains("then_"));
     assert!(ir.contains("else_"));
     assert!(ir.contains("merge_"));
     assert!(ir.contains("phi ptr"));
 
-    link_program(&ir, "runtime/libcem_runtime.a", "test_if_exe")
-        .expect("Failed to link");
+    link_program(&ir, "runtime/libcem_runtime.a", "test_if_exe").expect("Failed to link");
 
     // Run and check output - should print 42 (true branch)
     let output = Command::new("./test_if_exe")
@@ -266,7 +292,11 @@ fn test_if_expression() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("42"), "Expected 42 from true branch, got: {}", stdout);
+    assert!(
+        stdout.contains("42"),
+        "Expected 42 from true branch, got: {}",
+        stdout
+    );
 
     // Clean up
     std::fs::remove_file("test_if_exe").ok();
@@ -274,7 +304,10 @@ fn test_if_expression() {
 }
 
 #[test]
-#[cfg_attr(target_os = "linux", ignore = "Pre-existing test failure (not epoll-related)")]
+#[cfg_attr(
+    target_os = "linux",
+    ignore = "Pre-existing test failure (not epoll-related)"
+)]
 fn test_tail_call_optimization() {
     // Build runtime
     let runtime_status = Command::new("just")
@@ -292,7 +325,7 @@ fn test_tail_call_optimization() {
             inputs: StackType::Empty.push(Type::Int),
             outputs: StackType::Empty.push(Type::Int),
         },
-        body: vec![],  // Identity - does nothing, returns stack as-is
+        body: vec![], // Identity - does nothing, returns stack as-is
         loc: SourceLoc::unknown(),
     };
 
@@ -317,15 +350,18 @@ fn test_tail_call_optimization() {
 
     // Generate IR
     let mut codegen = CodeGen::new();
-    let ir = codegen.compile_program_with_main(&program, Some("call_identity"))
+    let ir = codegen
+        .compile_program_with_main(&program, Some("call_identity"))
         .expect("Failed to generate IR");
 
     // Verify IR contains musttail for the last word call
-    assert!(ir.contains("musttail call"), "Expected musttail optimization for tail call");
+    assert!(
+        ir.contains("musttail call"),
+        "Expected musttail optimization for tail call"
+    );
 
     // Link and run to verify it works
-    link_program(&ir, "runtime/libcem_runtime.a", "test_tail_call_exe")
-        .expect("Failed to link");
+    link_program(&ir, "runtime/libcem_runtime.a", "test_tail_call_exe").expect("Failed to link");
 
     let output = Command::new("./test_tail_call_exe")
         .output()
@@ -341,7 +377,10 @@ fn test_tail_call_optimization() {
 }
 
 #[test]
-#[cfg_attr(target_os = "linux", ignore = "Pre-existing test failure (not epoll-related)")]
+#[cfg_attr(
+    target_os = "linux",
+    ignore = "Pre-existing test failure (not epoll-related)"
+)]
 fn test_if_false_branch() {
     // Build runtime
     let runtime_status = Command::new("just")
@@ -360,11 +399,17 @@ fn test_if_false_branch() {
             outputs: StackType::Empty.push(Type::Int),
         },
         body: vec![
-            Expr::BoolLit(false, SourceLoc::unknown()),  // Push false
+            Expr::BoolLit(false, SourceLoc::unknown()), // Push false
             Expr::If {
-                then_branch: Box::new(Expr::Quotation(vec![Expr::IntLit(42, SourceLoc::unknown())], SourceLoc::unknown())),
-                else_branch: Box::new(Expr::Quotation(vec![Expr::IntLit(99, SourceLoc::unknown())], SourceLoc::unknown())),
-            loc: SourceLoc::unknown(),
+                then_branch: Box::new(Expr::Quotation(
+                    vec![Expr::IntLit(42, SourceLoc::unknown())],
+                    SourceLoc::unknown(),
+                )),
+                else_branch: Box::new(Expr::Quotation(
+                    vec![Expr::IntLit(99, SourceLoc::unknown())],
+                    SourceLoc::unknown(),
+                )),
+                loc: SourceLoc::unknown(),
             },
         ],
         loc: SourceLoc::unknown(),
@@ -377,11 +422,11 @@ fn test_if_false_branch() {
 
     // Generate and link
     let mut codegen = CodeGen::new();
-    let ir = codegen.compile_program_with_main(&program, Some("test_if_false"))
+    let ir = codegen
+        .compile_program_with_main(&program, Some("test_if_false"))
         .expect("Failed to generate IR");
 
-    link_program(&ir, "runtime/libcem_runtime.a", "test_if_false_exe")
-        .expect("Failed to link");
+    link_program(&ir, "runtime/libcem_runtime.a", "test_if_false_exe").expect("Failed to link");
 
     // Run and check output - should print 99 (false branch)
     let output = Command::new("./test_if_false_exe")
@@ -390,7 +435,11 @@ fn test_if_false_branch() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("99"), "Expected 99 from false branch, got: {}", stdout);
+    assert!(
+        stdout.contains("99"),
+        "Expected 99 from false branch, got: {}",
+        stdout
+    );
 
     // Clean up
     std::fs::remove_file("test_if_false_exe").ok();
@@ -398,7 +447,10 @@ fn test_if_false_branch() {
 }
 
 #[test]
-#[cfg_attr(target_os = "linux", ignore = "Pre-existing test failure (not epoll-related)")]
+#[cfg_attr(
+    target_os = "linux",
+    ignore = "Pre-existing test failure (not epoll-related)"
+)]
 fn test_tail_call_in_if_branch() {
     // Build runtime
     let runtime_status = Command::new("just")
@@ -416,7 +468,7 @@ fn test_tail_call_in_if_branch() {
             inputs: StackType::Empty.push(Type::Int),
             outputs: StackType::Empty.push(Type::Int),
         },
-        body: vec![],  // Identity - returns stack as-is
+        body: vec![], // Identity - returns stack as-is
         loc: SourceLoc::unknown(),
     };
 
@@ -430,22 +482,26 @@ fn test_tail_call_in_if_branch() {
             inputs: StackType::Empty.push(Type::Bool),
             outputs: StackType::Empty.push(Type::Int),
         },
-        body: vec![
-            Expr::If {
-                // Both branches call passthrough in tail position
-                // Then branch: push 42 then call passthrough
-                then_branch: Box::new(Expr::Quotation(vec![
+        body: vec![Expr::If {
+            // Both branches call passthrough in tail position
+            // Then branch: push 42 then call passthrough
+            then_branch: Box::new(Expr::Quotation(
+                vec![
                     Expr::IntLit(42, SourceLoc::unknown()),
                     Expr::WordCall("passthrough".to_string(), SourceLoc::unknown()),
-                ], SourceLoc::unknown())),
-                // Else branch: push 99 then call passthrough
-                else_branch: Box::new(Expr::Quotation(vec![
+                ],
+                SourceLoc::unknown(),
+            )),
+            // Else branch: push 99 then call passthrough
+            else_branch: Box::new(Expr::Quotation(
+                vec![
                     Expr::IntLit(99, SourceLoc::unknown()),
                     Expr::WordCall("passthrough".to_string(), SourceLoc::unknown()),
-                ], SourceLoc::unknown())),
+                ],
+                SourceLoc::unknown(),
+            )),
             loc: SourceLoc::unknown(),
-            },
-        ],
+        }],
         loc: SourceLoc::unknown(),
     };
 
@@ -471,17 +527,19 @@ fn test_tail_call_in_if_branch() {
 
     // Generate IR
     let mut codegen = CodeGen::new();
-    let ir = codegen.compile_program_with_main(&program, Some("test_entry"))
+    let ir = codegen
+        .compile_program_with_main(&program, Some("test_entry"))
         .expect("Failed to generate IR");
 
     // Critical check: verify that passthrough calls in the if branches are tail-optimized
     // The IR should contain "musttail call ptr @passthrough" inside the branch blocks
-    assert!(ir.contains("musttail call ptr @passthrough"),
-        "Expected musttail optimization for tail calls in if branches");
+    assert!(
+        ir.contains("musttail call ptr @passthrough"),
+        "Expected musttail optimization for tail calls in if branches"
+    );
 
     // Link and run to verify it works correctly
-    link_program(&ir, "runtime/libcem_runtime.a", "test_tail_in_if_exe")
-        .expect("Failed to link");
+    link_program(&ir, "runtime/libcem_runtime.a", "test_tail_in_if_exe").expect("Failed to link");
 
     let output = Command::new("./test_tail_in_if_exe")
         .output()
@@ -497,7 +555,10 @@ fn test_tail_call_in_if_branch() {
 }
 
 #[test]
-#[cfg_attr(target_os = "linux", ignore = "Pre-existing test failure (not epoll-related)")]
+#[cfg_attr(
+    target_os = "linux",
+    ignore = "Pre-existing test failure (not epoll-related)"
+)]
 fn test_nested_if_expressions() {
     // Build runtime
     let runtime_status = Command::new("just")
@@ -520,28 +581,44 @@ fn test_nested_if_expressions() {
             inputs: StackType::Empty.push(Type::Bool).push(Type::Bool),
             outputs: StackType::Empty.push(Type::Int),
         },
-        body: vec![
-            Expr::If {
-                // Outer if: first bool
-                then_branch: Box::new(Expr::Quotation(vec![
+        body: vec![Expr::If {
+            // Outer if: first bool
+            then_branch: Box::new(Expr::Quotation(
+                vec![
                     // Inner if in then branch
                     Expr::If {
-                        then_branch: Box::new(Expr::Quotation(vec![Expr::IntLit(1, SourceLoc::unknown())], SourceLoc::unknown())),
-                        else_branch: Box::new(Expr::Quotation(vec![Expr::IntLit(2, SourceLoc::unknown())], SourceLoc::unknown())),
+                        then_branch: Box::new(Expr::Quotation(
+                            vec![Expr::IntLit(1, SourceLoc::unknown())],
+                            SourceLoc::unknown(),
+                        )),
+                        else_branch: Box::new(Expr::Quotation(
+                            vec![Expr::IntLit(2, SourceLoc::unknown())],
+                            SourceLoc::unknown(),
+                        )),
                         loc: SourceLoc::unknown(),
                     },
-                ], SourceLoc::unknown())),
-                else_branch: Box::new(Expr::Quotation(vec![
+                ],
+                SourceLoc::unknown(),
+            )),
+            else_branch: Box::new(Expr::Quotation(
+                vec![
                     // Inner if in else branch
                     Expr::If {
-                        then_branch: Box::new(Expr::Quotation(vec![Expr::IntLit(3, SourceLoc::unknown())], SourceLoc::unknown())),
-                        else_branch: Box::new(Expr::Quotation(vec![Expr::IntLit(4, SourceLoc::unknown())], SourceLoc::unknown())),
+                        then_branch: Box::new(Expr::Quotation(
+                            vec![Expr::IntLit(3, SourceLoc::unknown())],
+                            SourceLoc::unknown(),
+                        )),
+                        else_branch: Box::new(Expr::Quotation(
+                            vec![Expr::IntLit(4, SourceLoc::unknown())],
+                            SourceLoc::unknown(),
+                        )),
                         loc: SourceLoc::unknown(),
                     },
-                ], SourceLoc::unknown())),
-                loc: SourceLoc::unknown(),
-            },
-        ],
+                ],
+                SourceLoc::unknown(),
+            )),
+            loc: SourceLoc::unknown(),
+        }],
         loc: SourceLoc::unknown(),
     };
 
@@ -553,8 +630,8 @@ fn test_nested_if_expressions() {
             outputs: StackType::Empty.push(Type::Int),
         },
         body: vec![
-            Expr::BoolLit(true, SourceLoc::unknown()),   // Inner condition
-            Expr::BoolLit(true, SourceLoc::unknown()),   // Outer condition
+            Expr::BoolLit(true, SourceLoc::unknown()), // Inner condition
+            Expr::BoolLit(true, SourceLoc::unknown()), // Outer condition
             Expr::WordCall("nested_if".to_string(), SourceLoc::unknown()),
         ],
         loc: SourceLoc::unknown(),
@@ -567,7 +644,8 @@ fn test_nested_if_expressions() {
 
     // Generate and link
     let mut codegen = CodeGen::new();
-    let ir = codegen.compile_program_with_main(&program, Some("test_true_true"))
+    let ir = codegen
+        .compile_program_with_main(&program, Some("test_true_true"))
         .expect("Failed to generate IR");
 
     // Verify IR contains nested branching structure
@@ -578,8 +656,7 @@ fn test_nested_if_expressions() {
     // Save IR for debugging
     std::fs::write("test_nested_if_debug.ll", &ir).expect("Failed to write IR");
 
-    link_program(&ir, "runtime/libcem_runtime.a", "test_nested_if_exe")
-        .expect("Failed to link");
+    link_program(&ir, "runtime/libcem_runtime.a", "test_nested_if_exe").expect("Failed to link");
 
     // Run and check output - should print 1 (both true)
     let output = Command::new("./test_nested_if_exe")
@@ -588,7 +665,11 @@ fn test_nested_if_expressions() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("1"), "Expected 1 from nested true/true case, got: {}", stdout);
+    assert!(
+        stdout.contains("1"),
+        "Expected 1 from nested true/true case, got: {}",
+        stdout
+    );
 
     // Clean up
     std::fs::remove_file("test_nested_if_exe").ok();
@@ -596,7 +677,10 @@ fn test_nested_if_expressions() {
 }
 
 #[test]
-#[cfg_attr(target_os = "linux", ignore = "Pre-existing test failure (not epoll-related)")]
+#[cfg_attr(
+    target_os = "linux",
+    ignore = "Pre-existing test failure (not epoll-related)"
+)]
 fn test_scheduler_linkage() {
     // Build runtime
     let runtime_status = Command::new("just")
@@ -632,7 +716,8 @@ fn test_scheduler_linkage() {
 
     // Generate IR
     let mut codegen = CodeGen::new();
-    let ir = codegen.compile_program_with_main(&program, Some("test_scheduler"))
+    let ir = codegen
+        .compile_program_with_main(&program, Some("test_scheduler"))
         .expect("Failed to generate IR");
 
     // Verify test_yield is declared and called
@@ -640,8 +725,7 @@ fn test_scheduler_linkage() {
     assert!(ir.contains("call ptr @test_yield"));
 
     // Link and run
-    link_program(&ir, "runtime/libcem_runtime.a", "test_scheduler_exe")
-        .expect("Failed to link");
+    link_program(&ir, "runtime/libcem_runtime.a", "test_scheduler_exe").expect("Failed to link");
 
     let output = Command::new("./test_scheduler_exe")
         .output()
@@ -651,7 +735,11 @@ fn test_scheduler_linkage() {
 
     // Should output 15 (5 + 10)
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("15"), "Expected 15 from 5 + 10, got: {}", stdout);
+    assert!(
+        stdout.contains("15"),
+        "Expected 15 from 5 + 10, got: {}",
+        stdout
+    );
 
     // Clean up
     std::fs::remove_file("test_scheduler_exe").ok();
@@ -667,7 +755,10 @@ fn test_debug_metadata_emission() {
             inputs: StackType::Empty,
             outputs: StackType::Empty.push(Type::Int),
         },
-        body: vec![Expr::IntLit(42, SourceLoc::new(1, 25, "test.cem".to_string()))],
+        body: vec![Expr::IntLit(
+            42,
+            SourceLoc::new(1, 25, "test.cem".to_string()),
+        )],
         loc: SourceLoc::new(1, 1, "test.cem".to_string()),
     };
 
@@ -677,22 +768,41 @@ fn test_debug_metadata_emission() {
     };
 
     let mut codegen = CodeGen::new();
-    let ir = codegen.compile_program(&program).expect("Failed to generate IR");
+    let ir = codegen
+        .compile_program(&program)
+        .expect("Failed to generate IR");
 
     // Verify debug metadata is present
     assert!(ir.contains("!DIFile"), "Should contain DIFile metadata");
-    assert!(ir.contains("!DICompileUnit"), "Should contain DICompileUnit metadata");
-    assert!(ir.contains("!DISubprogram"), "Should contain DISubprogram metadata");
-    assert!(ir.contains("!DILocation"), "Should contain DILocation metadata");
+    assert!(
+        ir.contains("!DICompileUnit"),
+        "Should contain DICompileUnit metadata"
+    );
+    assert!(
+        ir.contains("!DISubprogram"),
+        "Should contain DISubprogram metadata"
+    );
+    assert!(
+        ir.contains("!DILocation"),
+        "Should contain DILocation metadata"
+    );
     assert!(ir.contains("!llvm.dbg.cu"), "Should contain llvm.dbg.cu");
-    assert!(ir.contains("!llvm.module.flags"), "Should contain module flags");
+    assert!(
+        ir.contains("!llvm.module.flags"),
+        "Should contain module flags"
+    );
 
     // Verify instruction has debug annotation
-    assert!(ir.contains(", !dbg !"), "Instructions should have !dbg annotations");
+    assert!(
+        ir.contains(", !dbg !"),
+        "Instructions should have !dbg annotations"
+    );
 
     // Verify the function references its subprogram
-    assert!(ir.contains("define ptr @fortytwo(ptr %stack) !dbg !"),
-            "Function should reference DISubprogram");
+    assert!(
+        ir.contains("define ptr @fortytwo(ptr %stack) !dbg !"),
+        "Function should reference DISubprogram"
+    );
 }
 
 #[test]
@@ -704,7 +814,10 @@ fn test_debug_metadata_filename_escaping() {
             inputs: StackType::Empty,
             outputs: StackType::Empty.push(Type::Int),
         },
-        body: vec![Expr::IntLit(42, SourceLoc::new(1, 1, "test\"file.cem".to_string()))],
+        body: vec![Expr::IntLit(
+            42,
+            SourceLoc::new(1, 1, "test\"file.cem".to_string()),
+        )],
         loc: SourceLoc::new(1, 1, "test\"file.cem".to_string()),
     };
 
@@ -714,9 +827,13 @@ fn test_debug_metadata_filename_escaping() {
     };
 
     let mut codegen = CodeGen::new();
-    let ir = codegen.compile_program(&program).expect("Failed to generate IR");
+    let ir = codegen
+        .compile_program(&program)
+        .expect("Failed to generate IR");
 
     // Verify the filename is properly escaped (quote becomes \")
-    assert!(ir.contains(r#"!DIFile(filename: "test\"file.cem""#),
-            "Filename with quotes should be escaped");
+    assert!(
+        ir.contains(r#"!DIFile(filename: "test\"file.cem""#),
+        "Filename with quotes should be escaped"
+    );
 }

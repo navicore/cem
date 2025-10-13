@@ -40,20 +40,23 @@
  * This implementation makes STRONG assumptions about the threading model:
  *
  * 1. **Single-threaded cooperative scheduler only**
- *    - Cem currently uses ONE OS thread for all strands (see README.md "Concurrency Model")
+ *    - Cem currently uses ONE OS thread for all strands (see README.md
+ * "Concurrency Model")
  *    - Cooperative multitasking with explicit yield points at I/O operations
  *    - No OS-level preemption between strands
  *    - Only ONE strand executes at a time
  *
  * 2. **Signal handler accesses global state WITHOUT locks**
  *    - The SIGSEGV handler reads g_scheduler and current_strand
- *    - This is SAFE ONLY because signals arrive synchronously during strand execution
+ *    - This is SAFE ONLY because signals arrive synchronously during strand
+ * execution
  *    - The executing strand's metadata is stable (not being modified elsewhere)
  *
  * 3. **If you port Cem to multi-threading or preemptive scheduling:**
  *    - Add proper locking around scheduler state (g_scheduler, current_strand)
  *    - Use atomic operations for stack metadata updates
- *    - Consider per-thread signal handlers or disable signals during critical sections
+ *    - Consider per-thread signal handlers or disable signals during critical
+ * sections
  *    - Review ALL uses of global state in this module
  *
  * 4. **Stack growth operations are NOT reentrant**
@@ -67,10 +70,10 @@
 #ifndef CEM_RUNTIME_STACK_MGMT_H
 #define CEM_RUNTIME_STACK_MGMT_H
 
+#include "context.h"
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdbool.h>
-#include "context.h"
 
 // Forward declarations
 struct Strand;
@@ -87,15 +90,15 @@ struct Scheduler;
  * Stored in Strand structure (Phase 3 replaces c_stack/c_stack_size).
  */
 typedef struct {
-    void* base;              // Base address (low address, includes guard page)
-    void* usable_base;       // Start of usable stack (base + PAGE_SIZE)
-    size_t total_size;       // Total allocated size (including guard page)
-    size_t usable_size;      // Usable stack size (total_size - PAGE_SIZE)
-    size_t guard_page_size;  // Size of guard page (usually 4KB or 16KB)
+  void *base;             // Base address (low address, includes guard page)
+  void *usable_base;      // Start of usable stack (base + PAGE_SIZE)
+  size_t total_size;      // Total allocated size (including guard page)
+  size_t usable_size;     // Usable stack size (total_size - PAGE_SIZE)
+  size_t guard_page_size; // Size of guard page (usually 4KB or 16KB)
 
-    // Growth statistics
-    uint32_t growth_count;   // Number of times this stack has grown
-    bool guard_hit;          // True if guard page was ever hit (warning flag)
+  // Growth statistics
+  uint32_t growth_count; // Number of times this stack has grown
+  bool guard_hit;        // True if guard page was ever hit (warning flag)
 } StackMetadata;
 
 // ============================================================================
@@ -108,10 +111,11 @@ typedef struct {
  * Uses mmap() to allocate a memory region with a guard page at the bottom.
  * The guard page has PROT_NONE protection, causing SIGSEGV if accessed.
  *
- * @param initial_size - Initial usable stack size (typically CEM_INITIAL_STACK_SIZE)
+ * @param initial_size - Initial usable stack size (typically
+ * CEM_INITIAL_STACK_SIZE)
  * @return Stack metadata, or NULL on allocation failure
  */
-StackMetadata* stack_alloc(size_t initial_size);
+StackMetadata *stack_alloc(size_t initial_size);
 
 /**
  * Free a dynamic stack
@@ -120,7 +124,7 @@ StackMetadata* stack_alloc(size_t initial_size);
  *
  * @param meta - Stack metadata to free
  */
-void stack_free(StackMetadata* meta);
+void stack_free(StackMetadata *meta);
 
 // ============================================================================
 // Stack Growth
@@ -139,7 +143,7 @@ void stack_free(StackMetadata* meta);
  * @param current_sp - Current stack pointer value (from context)
  * @return true if stack was grown, false if no growth needed
  */
-bool stack_check_and_grow(struct Strand* strand, uintptr_t current_sp);
+bool stack_check_and_grow(struct Strand *strand, uintptr_t current_sp);
 
 /**
  * Grow a stack to a new size (internal)
@@ -152,10 +156,12 @@ bool stack_check_and_grow(struct Strand* strand, uintptr_t current_sp);
  *
  * @param strand - Strand whose stack to grow
  * @param new_usable_size - New usable stack size (must be > current size)
- * @param in_signal_handler - true if called from SIGSEGV handler, false otherwise
+ * @param in_signal_handler - true if called from SIGSEGV handler, false
+ * otherwise
  * @return true on success, false on failure
  */
-bool stack_grow(struct Strand* strand, size_t new_usable_size, bool in_signal_handler);
+bool stack_grow(struct Strand *strand, size_t new_usable_size,
+                bool in_signal_handler);
 
 // ============================================================================
 // Emergency Guard Page Handler
@@ -177,17 +183,21 @@ bool stack_grow(struct Strand* strand, size_t new_usable_size, bool in_signal_ha
  * - Uses write() instead of fprintf() for all output in signal context
  * - stack_grow() detects signal context and uses only signal-safe functions
  * - Calls mmap/munmap/memcpy (all async-signal-safe per POSIX)
- * - Accesses g_scheduler without locks (safe in cooperative single-threaded model)
+ * - Accesses g_scheduler without locks (safe in cooperative single-threaded
+ * model)
  *
  * REMAINING LIMITATIONS:
  * - malloc/free in stack_alloc() are NOT async-signal-safe
- *   * Risk: If SIGSEGV arrives during malloc(), calling malloc() in handler may deadlock
+ *   * Risk: If SIGSEGV arrives during malloc(), calling malloc() in handler may
+ * deadlock
  *   * Mitigation: Could pre-allocate emergency stack metadata (future work)
  * - If stack_grow() is interrupted by another signal, behavior is undefined
- *   * Mitigation: Could block signals during growth with sigprocmask() (future work)
+ *   * Mitigation: Could block signals during growth with sigprocmask() (future
+ * work)
  *
  * These limitations are acceptable for the current single-threaded cooperative
- * scheduler, but should be addressed if porting to multi-threaded or real-time use
+ * scheduler, but should be addressed if porting to multi-threaded or real-time
+ * use
  */
 void stack_guard_init_signal_handler(void);
 
@@ -200,7 +210,7 @@ void stack_guard_init_signal_handler(void);
  *
  * @param scheduler - Pointer to global scheduler
  */
-void stack_guard_set_scheduler(struct Scheduler* scheduler);
+void stack_guard_set_scheduler(struct Scheduler *scheduler);
 
 /**
  * Check if an address is within a strand's guard page (internal)
@@ -211,7 +221,7 @@ void stack_guard_set_scheduler(struct Scheduler* scheduler);
  * @param meta - Stack metadata to check
  * @return true if addr is in the guard page
  */
-bool stack_is_guard_page_fault(uintptr_t addr, const StackMetadata* meta);
+bool stack_is_guard_page_fault(uintptr_t addr, const StackMetadata *meta);
 
 // ============================================================================
 // Stack Usage Statistics
@@ -224,7 +234,7 @@ bool stack_is_guard_page_fault(uintptr_t addr, const StackMetadata* meta);
  * @param current_sp - Current stack pointer
  * @return Number of bytes currently used on stack
  */
-size_t stack_get_used(const StackMetadata* meta, uintptr_t current_sp);
+size_t stack_get_used(const StackMetadata *meta, uintptr_t current_sp);
 
 /**
  * Calculate current free stack space
@@ -233,13 +243,13 @@ size_t stack_get_used(const StackMetadata* meta, uintptr_t current_sp);
  * @param current_sp - Current stack pointer
  * @return Number of bytes free (between SP and guard page)
  */
-size_t stack_get_free(const StackMetadata* meta, uintptr_t current_sp);
+size_t stack_get_free(const StackMetadata *meta, uintptr_t current_sp);
 
 /**
  * Get system page size (cached)
  *
- * Returns the system page size (e.g., 4KB on most systems, 16KB on Apple Silicon).
- * Cached after first call for performance.
+ * Returns the system page size (e.g., 4KB on most systems, 16KB on Apple
+ * Silicon). Cached after first call for performance.
  *
  * @return Page size in bytes
  */

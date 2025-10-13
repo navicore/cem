@@ -6,47 +6,49 @@
 
 #define _POSIX_C_SOURCE 200809L
 #include "stack.h"
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 // Compile-time assertions to verify ABI assumptions
 // The LLVM codegen assumes bool is 1 byte (i8) - verify this at compile time
 _Static_assert(sizeof(bool) == 1, "LLVM codegen assumes bool is 1 byte (i8)");
-_Static_assert(sizeof(StackCell) == 32, "LLVM codegen assumes StackCell is 32 bytes");
+_Static_assert(sizeof(StackCell) == 32,
+               "LLVM codegen assumes StackCell is 32 bytes");
 
 // ============================================================================
 // Utility Functions
 // ============================================================================
 
-StackCell* alloc_cell(void) {
-    StackCell* cell = (StackCell*)malloc(sizeof(StackCell));
-    if (!cell) {
-        runtime_error("Out of memory");
-    }
-    cell->next = NULL;
-    return cell;
+StackCell *alloc_cell(void) {
+  StackCell *cell = (StackCell *)malloc(sizeof(StackCell));
+  if (!cell) {
+    runtime_error("Out of memory");
+  }
+  cell->next = NULL;
+  return cell;
 }
 
-void free_cell(StackCell* cell) {
-    if (!cell) return;
+void free_cell(StackCell *cell) {
+  if (!cell)
+    return;
 
-    // Free owned resources based on tag
-    if (cell->tag == TAG_STRING && cell->value.s) {
-        free(cell->value.s);
-    }
-    // TODO: Free variant data when implemented
+  // Free owned resources based on tag
+  if (cell->tag == TAG_STRING && cell->value.s) {
+    free(cell->value.s);
+  }
+  // TODO: Free variant data when implemented
 
-    free(cell);
+  free(cell);
 }
 
-void free_stack(StackCell* stack) {
-    while (stack) {
-        StackCell* next = stack->next;
-        free_cell(stack);
-        stack = next;
-    }
+void free_stack(StackCell *stack) {
+  while (stack) {
+    StackCell *next = stack->next;
+    free_cell(stack);
+    stack = next;
+  }
 }
 
 // Runtime error handler
@@ -68,483 +70,484 @@ void free_stack(StackCell* stack) {
 // Example: string_concat allocates a temp buffer, then calls push_string.
 // If push_string fails with runtime_error(), the temp buffer leaks. This is
 // safe because exit(1) terminates the process immediately.
-void runtime_error(const char* message) {
-    fprintf(stderr, "Runtime error: %s\n", message);
-    exit(1);
+void runtime_error(const char *message) {
+  fprintf(stderr, "Runtime error: %s\n", message);
+  exit(1);
 }
 
-void print_stack(StackCell* stack) {
-    printf("Stack (top to bottom): ");
-    StackCell* current = stack;
-    while (current) {
-        switch (current->tag) {
-            case TAG_INT:
-                printf("%lld ", (long long)current->value.i);
-                break;
-            case TAG_BOOL:
-                printf("%s ", current->value.b ? "true" : "false");
-                break;
-            case TAG_STRING:
-                printf("\"%s\" ", current->value.s);
-                break;
-            case TAG_QUOTATION:
-                printf("<quotation> ");
-                break;
-            case TAG_VARIANT:
-                printf("<variant:%u> ", current->value.variant.tag);
-                break;
-        }
-        current = current->next;
+void print_stack(StackCell *stack) {
+  printf("Stack (top to bottom): ");
+  StackCell *current = stack;
+  while (current) {
+    switch (current->tag) {
+    case TAG_INT:
+      printf("%lld ", (long long)current->value.i);
+      break;
+    case TAG_BOOL:
+      printf("%s ", current->value.b ? "true" : "false");
+      break;
+    case TAG_STRING:
+      printf("\"%s\" ", current->value.s);
+      break;
+    case TAG_QUOTATION:
+      printf("<quotation> ");
+      break;
+    case TAG_VARIANT:
+      printf("<variant:%u> ", current->value.variant.tag);
+      break;
     }
-    printf("\n");
+    current = current->next;
+  }
+  printf("\n");
 }
 
 // ============================================================================
 // Stack Operations
 // ============================================================================
 
-StackCell* dup(StackCell* stack) {
-    if (!stack) {
-        runtime_error("dup: stack underflow");
+StackCell *dup(StackCell *stack) {
+  if (!stack) {
+    runtime_error("dup: stack underflow");
+  }
+
+  StackCell *new_cell = alloc_cell();
+  new_cell->tag = stack->tag;
+
+  // Deep copy the value
+  switch (stack->tag) {
+  case TAG_INT:
+    new_cell->value.i = stack->value.i;
+    break;
+  case TAG_BOOL:
+    new_cell->value.b = stack->value.b;
+    break;
+  case TAG_STRING:
+    new_cell->value.s = strdup(stack->value.s);
+    if (!new_cell->value.s) {
+      free_cell(new_cell);
+      runtime_error("dup: out of memory");
     }
+    break;
+  case TAG_QUOTATION:
+    new_cell->value.quotation = stack->value.quotation;
+    break;
+  case TAG_VARIANT:
+    // TODO: Implement variant copying
+    free_cell(new_cell);
+    runtime_error("dup: variant copying not yet implemented");
+    break;
+  }
 
-    StackCell* new_cell = alloc_cell();
-    new_cell->tag = stack->tag;
-
-    // Deep copy the value
-    switch (stack->tag) {
-        case TAG_INT:
-            new_cell->value.i = stack->value.i;
-            break;
-        case TAG_BOOL:
-            new_cell->value.b = stack->value.b;
-            break;
-        case TAG_STRING:
-            new_cell->value.s = strdup(stack->value.s);
-            if (!new_cell->value.s) {
-                free_cell(new_cell);
-                runtime_error("dup: out of memory");
-            }
-            break;
-        case TAG_QUOTATION:
-            new_cell->value.quotation = stack->value.quotation;
-            break;
-        case TAG_VARIANT:
-            // TODO: Implement variant copying
-            free_cell(new_cell);
-            runtime_error("dup: variant copying not yet implemented");
-            break;
-    }
-
-    new_cell->next = stack;
-    return new_cell;
+  new_cell->next = stack;
+  return new_cell;
 }
 
-StackCell* drop(StackCell* stack) {
-    if (!stack) {
-        runtime_error("drop: stack underflow");
-    }
+StackCell *drop(StackCell *stack) {
+  if (!stack) {
+    runtime_error("drop: stack underflow");
+  }
 
-    StackCell* rest = stack->next;
-    free_cell(stack);
-    return rest;
+  StackCell *rest = stack->next;
+  free_cell(stack);
+  return rest;
 }
 
-StackCell* swap(StackCell* stack) {
-    if (!stack || !stack->next) {
-        runtime_error("swap: stack underflow");
-    }
+StackCell *swap(StackCell *stack) {
+  if (!stack || !stack->next) {
+    runtime_error("swap: stack underflow");
+  }
 
-    StackCell* first = stack;
-    StackCell* second = stack->next;
-    StackCell* rest = second->next;
+  StackCell *first = stack;
+  StackCell *second = stack->next;
+  StackCell *rest = second->next;
 
-    second->next = first;
-    first->next = rest;
+  second->next = first;
+  first->next = rest;
 
-    return second;
+  return second;
 }
 
-StackCell* over(StackCell* stack) {
-    if (!stack || !stack->next) {
-        runtime_error("over: stack underflow");
+StackCell *over(StackCell *stack) {
+  if (!stack || !stack->next) {
+    runtime_error("over: stack underflow");
+  }
+
+  StackCell *second = stack->next;
+  StackCell *new_cell = alloc_cell();
+  new_cell->tag = second->tag;
+
+  // Deep copy second element
+  switch (second->tag) {
+  case TAG_INT:
+    new_cell->value.i = second->value.i;
+    break;
+  case TAG_BOOL:
+    new_cell->value.b = second->value.b;
+    break;
+  case TAG_STRING:
+    new_cell->value.s = strdup(second->value.s);
+    if (!new_cell->value.s) {
+      free_cell(new_cell);
+      runtime_error("over: out of memory");
     }
+    break;
+  case TAG_QUOTATION:
+    new_cell->value.quotation = second->value.quotation;
+    break;
+  case TAG_VARIANT:
+    free_cell(new_cell);
+    runtime_error("over: variant copying not yet implemented");
+    break;
+  }
 
-    StackCell* second = stack->next;
-    StackCell* new_cell = alloc_cell();
-    new_cell->tag = second->tag;
-
-    // Deep copy second element
-    switch (second->tag) {
-        case TAG_INT:
-            new_cell->value.i = second->value.i;
-            break;
-        case TAG_BOOL:
-            new_cell->value.b = second->value.b;
-            break;
-        case TAG_STRING:
-            new_cell->value.s = strdup(second->value.s);
-            if (!new_cell->value.s) {
-                free_cell(new_cell);
-                runtime_error("over: out of memory");
-            }
-            break;
-        case TAG_QUOTATION:
-            new_cell->value.quotation = second->value.quotation;
-            break;
-        case TAG_VARIANT:
-            free_cell(new_cell);
-            runtime_error("over: variant copying not yet implemented");
-            break;
-    }
-
-    new_cell->next = stack;
-    return new_cell;
+  new_cell->next = stack;
+  return new_cell;
 }
 
-StackCell* rot(StackCell* stack) {
-    if (!stack || !stack->next || !stack->next->next) {
-        runtime_error("rot: stack underflow");
-    }
+StackCell *rot(StackCell *stack) {
+  if (!stack || !stack->next || !stack->next->next) {
+    runtime_error("rot: stack underflow");
+  }
 
-    StackCell* first = stack;
-    StackCell* second = stack->next;
-    StackCell* third = second->next;
-    StackCell* rest = third->next;
+  StackCell *first = stack;
+  StackCell *second = stack->next;
+  StackCell *third = second->next;
+  StackCell *rest = third->next;
 
-    // Rotate: A B C -> B C A
-    second->next = third;
-    third->next = first;
-    first->next = rest;
+  // Rotate: A B C -> B C A
+  second->next = third;
+  third->next = first;
+  first->next = rest;
 
-    return second;
+  return second;
 }
 
 // ============================================================================
 // Arithmetic Operations
 // ============================================================================
-// Note: All arithmetic operations use wrapping semantics (like Rust's wrapping_*).
-// Integer overflow wraps around according to two's complement representation.
-// This is standard behavior for stack-based concatenative languages.
+// Note: All arithmetic operations use wrapping semantics (like Rust's
+// wrapping_*). Integer overflow wraps around according to two's complement
+// representation. This is standard behavior for stack-based concatenative
+// languages.
 
-StackCell* add(StackCell* stack) {
-    if (!stack || !stack->next) {
-        runtime_error("add: stack underflow");
-    }
-    if (stack->tag != TAG_INT || stack->next->tag != TAG_INT) {
-        runtime_error("add: type error (expected Int Int)");
-    }
+StackCell *add(StackCell *stack) {
+  if (!stack || !stack->next) {
+    runtime_error("add: stack underflow");
+  }
+  if (stack->tag != TAG_INT || stack->next->tag != TAG_INT) {
+    runtime_error("add: type error (expected Int Int)");
+  }
 
-    int64_t b = stack->value.i;
-    int64_t a = stack->next->value.i;
+  int64_t b = stack->value.i;
+  int64_t a = stack->next->value.i;
 
-    StackCell* rest = stack->next->next;
-    free_cell(stack->next);
-    free_cell(stack);
+  StackCell *rest = stack->next->next;
+  free_cell(stack->next);
+  free_cell(stack);
 
-    return push_int(rest, a + b);
+  return push_int(rest, a + b);
 }
 
-StackCell* subtract(StackCell* stack) {
-    if (!stack || !stack->next) {
-        runtime_error("subtract: stack underflow");
-    }
-    if (stack->tag != TAG_INT || stack->next->tag != TAG_INT) {
-        runtime_error("subtract: type error (expected Int Int)");
-    }
+StackCell *subtract(StackCell *stack) {
+  if (!stack || !stack->next) {
+    runtime_error("subtract: stack underflow");
+  }
+  if (stack->tag != TAG_INT || stack->next->tag != TAG_INT) {
+    runtime_error("subtract: type error (expected Int Int)");
+  }
 
-    int64_t b = stack->value.i;
-    int64_t a = stack->next->value.i;
+  int64_t b = stack->value.i;
+  int64_t a = stack->next->value.i;
 
-    StackCell* rest = stack->next->next;
-    free_cell(stack->next);
-    free_cell(stack);
+  StackCell *rest = stack->next->next;
+  free_cell(stack->next);
+  free_cell(stack);
 
-    return push_int(rest, a - b);
+  return push_int(rest, a - b);
 }
 
-StackCell* multiply(StackCell* stack) {
-    if (!stack || !stack->next) {
-        runtime_error("multiply: stack underflow");
-    }
-    if (stack->tag != TAG_INT || stack->next->tag != TAG_INT) {
-        runtime_error("multiply: type error (expected Int Int)");
-    }
+StackCell *multiply(StackCell *stack) {
+  if (!stack || !stack->next) {
+    runtime_error("multiply: stack underflow");
+  }
+  if (stack->tag != TAG_INT || stack->next->tag != TAG_INT) {
+    runtime_error("multiply: type error (expected Int Int)");
+  }
 
-    int64_t b = stack->value.i;
-    int64_t a = stack->next->value.i;
+  int64_t b = stack->value.i;
+  int64_t a = stack->next->value.i;
 
-    StackCell* rest = stack->next->next;
-    free_cell(stack->next);
-    free_cell(stack);
+  StackCell *rest = stack->next->next;
+  free_cell(stack->next);
+  free_cell(stack);
 
-    return push_int(rest, a * b);
+  return push_int(rest, a * b);
 }
 
-StackCell* divide_op(StackCell* stack) {
-    if (!stack || !stack->next) {
-        runtime_error("divide: stack underflow");
-    }
-    if (stack->tag != TAG_INT || stack->next->tag != TAG_INT) {
-        runtime_error("divide: type error (expected Int Int)");
-    }
+StackCell *divide_op(StackCell *stack) {
+  if (!stack || !stack->next) {
+    runtime_error("divide: stack underflow");
+  }
+  if (stack->tag != TAG_INT || stack->next->tag != TAG_INT) {
+    runtime_error("divide: type error (expected Int Int)");
+  }
 
-    int64_t b = stack->value.i;
-    int64_t a = stack->next->value.i;
+  int64_t b = stack->value.i;
+  int64_t a = stack->next->value.i;
 
-    if (b == 0) {
-        runtime_error("divide: division by zero");
-    }
+  if (b == 0) {
+    runtime_error("divide: division by zero");
+  }
 
-    StackCell* rest = stack->next->next;
-    free_cell(stack->next);
-    free_cell(stack);
+  StackCell *rest = stack->next->next;
+  free_cell(stack->next);
+  free_cell(stack);
 
-    return push_int(rest, a / b);
+  return push_int(rest, a / b);
 }
 
 // ============================================================================
 // Comparison Operations
 // ============================================================================
 
-StackCell* less_than(StackCell* stack) {
-    if (!stack || !stack->next) {
-        runtime_error("less_than: stack underflow");
-    }
-    if (stack->tag != TAG_INT || stack->next->tag != TAG_INT) {
-        runtime_error("less_than: type error (expected Int Int)");
-    }
+StackCell *less_than(StackCell *stack) {
+  if (!stack || !stack->next) {
+    runtime_error("less_than: stack underflow");
+  }
+  if (stack->tag != TAG_INT || stack->next->tag != TAG_INT) {
+    runtime_error("less_than: type error (expected Int Int)");
+  }
 
-    int64_t b = stack->value.i;
-    int64_t a = stack->next->value.i;
+  int64_t b = stack->value.i;
+  int64_t a = stack->next->value.i;
 
-    StackCell* rest = stack->next->next;
-    free_cell(stack->next);
-    free_cell(stack);
+  StackCell *rest = stack->next->next;
+  free_cell(stack->next);
+  free_cell(stack);
 
-    return push_bool(rest, a < b);
+  return push_bool(rest, a < b);
 }
 
-StackCell* greater_than(StackCell* stack) {
-    if (!stack || !stack->next) {
-        runtime_error("greater_than: stack underflow");
-    }
-    if (stack->tag != TAG_INT || stack->next->tag != TAG_INT) {
-        runtime_error("greater_than: type error (expected Int Int)");
-    }
+StackCell *greater_than(StackCell *stack) {
+  if (!stack || !stack->next) {
+    runtime_error("greater_than: stack underflow");
+  }
+  if (stack->tag != TAG_INT || stack->next->tag != TAG_INT) {
+    runtime_error("greater_than: type error (expected Int Int)");
+  }
 
-    int64_t b = stack->value.i;
-    int64_t a = stack->next->value.i;
+  int64_t b = stack->value.i;
+  int64_t a = stack->next->value.i;
 
-    StackCell* rest = stack->next->next;
-    free_cell(stack->next);
-    free_cell(stack);
+  StackCell *rest = stack->next->next;
+  free_cell(stack->next);
+  free_cell(stack);
 
-    return push_bool(rest, a > b);
+  return push_bool(rest, a > b);
 }
 
-StackCell* equal(StackCell* stack) {
-    if (!stack || !stack->next) {
-        runtime_error("equal: stack underflow");
+StackCell *equal(StackCell *stack) {
+  if (!stack || !stack->next) {
+    runtime_error("equal: stack underflow");
+  }
+
+  bool result = false;
+
+  // Check if tags match
+  if (stack->tag == stack->next->tag) {
+    switch (stack->tag) {
+    case TAG_INT:
+      result = (stack->value.i == stack->next->value.i);
+      break;
+    case TAG_BOOL:
+      result = (stack->value.b == stack->next->value.b);
+      break;
+    case TAG_STRING:
+      result = (strcmp(stack->value.s, stack->next->value.s) == 0);
+      break;
+    case TAG_QUOTATION:
+      result = (stack->value.quotation == stack->next->value.quotation);
+      break;
+    case TAG_VARIANT:
+      // TODO: Implement variant equality
+      runtime_error("equal: variant comparison not yet implemented");
+      break;
     }
+  }
 
-    bool result = false;
+  StackCell *rest = stack->next->next;
+  free_cell(stack->next);
+  free_cell(stack);
 
-    // Check if tags match
-    if (stack->tag == stack->next->tag) {
-        switch (stack->tag) {
-            case TAG_INT:
-                result = (stack->value.i == stack->next->value.i);
-                break;
-            case TAG_BOOL:
-                result = (stack->value.b == stack->next->value.b);
-                break;
-            case TAG_STRING:
-                result = (strcmp(stack->value.s, stack->next->value.s) == 0);
-                break;
-            case TAG_QUOTATION:
-                result = (stack->value.quotation == stack->next->value.quotation);
-                break;
-            case TAG_VARIANT:
-                // TODO: Implement variant equality
-                runtime_error("equal: variant comparison not yet implemented");
-                break;
-        }
-    }
-
-    StackCell* rest = stack->next->next;
-    free_cell(stack->next);
-    free_cell(stack);
-
-    return push_bool(rest, result);
+  return push_bool(rest, result);
 }
 
 // ============================================================================
 // Push Operations
 // ============================================================================
 
-StackCell* push_int(StackCell* stack, int64_t value) {
-    StackCell* cell = alloc_cell();
-    cell->tag = TAG_INT;
-    cell->value.i = value;
-    cell->next = stack;
-    return cell;
+StackCell *push_int(StackCell *stack, int64_t value) {
+  StackCell *cell = alloc_cell();
+  cell->tag = TAG_INT;
+  cell->value.i = value;
+  cell->next = stack;
+  return cell;
 }
 
-StackCell* push_bool(StackCell* stack, bool value) {
-    StackCell* cell = alloc_cell();
-    cell->tag = TAG_BOOL;
-    cell->value.b = value;
-    cell->next = stack;
-    return cell;
+StackCell *push_bool(StackCell *stack, bool value) {
+  StackCell *cell = alloc_cell();
+  cell->tag = TAG_BOOL;
+  cell->value.b = value;
+  cell->next = stack;
+  return cell;
 }
 
-StackCell* push_string(StackCell* stack, const char* value) {
-    StackCell* cell = alloc_cell();
-    cell->tag = TAG_STRING;
-    cell->value.s = strdup(value);
-    if (!cell->value.s) {
-        runtime_error("push_string: out of memory");
-    }
-    cell->next = stack;
-    return cell;
+StackCell *push_string(StackCell *stack, const char *value) {
+  StackCell *cell = alloc_cell();
+  cell->tag = TAG_STRING;
+  cell->value.s = strdup(value);
+  if (!cell->value.s) {
+    runtime_error("push_string: out of memory");
+  }
+  cell->next = stack;
+  return cell;
 }
 
-StackCell* push_quotation(StackCell* stack, void* func_ptr) {
-    StackCell* cell = alloc_cell();
-    cell->tag = TAG_QUOTATION;
-    cell->value.quotation = func_ptr;
-    cell->next = stack;
-    return cell;
+StackCell *push_quotation(StackCell *stack, void *func_ptr) {
+  StackCell *cell = alloc_cell();
+  cell->tag = TAG_QUOTATION;
+  cell->value.quotation = func_ptr;
+  cell->next = stack;
+  return cell;
 }
 
 // ============================================================================
 // String Operations
 // ============================================================================
 
-StackCell* string_length(StackCell* stack) {
-    if (!stack) {
-        runtime_error("string_length: stack underflow");
-    }
-    if (stack->tag != TAG_STRING) {
-        runtime_error("string_length: expected string on top of stack");
-    }
-    if (!stack->value.s) {
-        runtime_error("string_length: NULL string pointer");
-    }
+StackCell *string_length(StackCell *stack) {
+  if (!stack) {
+    runtime_error("string_length: stack underflow");
+  }
+  if (stack->tag != TAG_STRING) {
+    runtime_error("string_length: expected string on top of stack");
+  }
+  if (!stack->value.s) {
+    runtime_error("string_length: NULL string pointer");
+  }
 
-    // Calculate length (returns byte count, not UTF-8 character count)
-    int64_t len = (int64_t)strlen(stack->value.s);
+  // Calculate length (returns byte count, not UTF-8 character count)
+  int64_t len = (int64_t)strlen(stack->value.s);
 
-    // Pop string and push length
-    StackCell* rest = stack->next;
-    free_cell(stack);
+  // Pop string and push length
+  StackCell *rest = stack->next;
+  free_cell(stack);
 
-    return push_int(rest, len);
+  return push_int(rest, len);
 }
 
-StackCell* string_concat(StackCell* stack) {
-    if (!stack || !stack->next) {
-        runtime_error("string_concat: stack underflow");
-    }
-    if (stack->tag != TAG_STRING || stack->next->tag != TAG_STRING) {
-        runtime_error("string_concat: expected two strings on stack");
-    }
+StackCell *string_concat(StackCell *stack) {
+  if (!stack || !stack->next) {
+    runtime_error("string_concat: stack underflow");
+  }
+  if (stack->tag != TAG_STRING || stack->next->tag != TAG_STRING) {
+    runtime_error("string_concat: expected two strings on stack");
+  }
 
-    // Get both strings (top is second operand, next is first operand)
-    char* str2 = stack->value.s;
-    char* str1 = stack->next->value.s;
+  // Get both strings (top is second operand, next is first operand)
+  char *str2 = stack->value.s;
+  char *str1 = stack->next->value.s;
 
-    // NULL pointer checks
-    if (!str1 || !str2) {
-        runtime_error("string_concat: NULL string pointer");
-    }
+  // NULL pointer checks
+  if (!str1 || !str2) {
+    runtime_error("string_concat: NULL string pointer");
+  }
 
-    // Calculate lengths and check for overflow
-    size_t len1 = strlen(str1);
-    size_t len2 = strlen(str2);
+  // Calculate lengths and check for overflow
+  size_t len1 = strlen(str1);
+  size_t len2 = strlen(str2);
 
-    // Check for size_t overflow: len1 + len2 + 1
-    if (len1 > SIZE_MAX - len2 - 1) {
-        runtime_error("string_concat: string too long (overflow)");
-    }
-    size_t total_len = len1 + len2 + 1;
+  // Check for size_t overflow: len1 + len2 + 1
+  if (len1 > SIZE_MAX - len2 - 1) {
+    runtime_error("string_concat: string too long (overflow)");
+  }
+  size_t total_len = len1 + len2 + 1;
 
-    // Allocate new string
-    char* result = malloc(total_len);
-    if (!result) {
-        runtime_error("string_concat: out of memory");
-    }
+  // Allocate new string
+  char *result = malloc(total_len);
+  if (!result) {
+    runtime_error("string_concat: out of memory");
+  }
 
-    // Concatenate using memcpy (safer than strcpy/strcat)
-    memcpy(result, str1, len1);
-    memcpy(result + len1, str2, len2);
-    result[len1 + len2] = '\0';
+  // Concatenate using memcpy (safer than strcpy/strcat)
+  memcpy(result, str1, len1);
+  memcpy(result + len1, str2, len2);
+  result[len1 + len2] = '\0';
 
-    // Pop both strings BEFORE push_string (in case push_string fails)
-    StackCell* rest = stack->next->next;
-    free_cell(stack->next);
-    free_cell(stack);
+  // Pop both strings BEFORE push_string (in case push_string fails)
+  StackCell *rest = stack->next->next;
+  free_cell(stack->next);
+  free_cell(stack);
 
-    // Push result (this makes its own copy)
-    StackCell* new_cell = push_string(rest, result);
+  // Push result (this makes its own copy)
+  StackCell *new_cell = push_string(rest, result);
 
-    // Free our temporary buffer
-    free(result);
+  // Free our temporary buffer
+  free(result);
 
-    return new_cell;
+  return new_cell;
 }
 
-StackCell* string_equal(StackCell* stack) {
-    if (!stack || !stack->next) {
-        runtime_error("string_equal: stack underflow");
-    }
-    if (stack->tag != TAG_STRING || stack->next->tag != TAG_STRING) {
-        runtime_error("string_equal: expected two strings on stack");
-    }
+StackCell *string_equal(StackCell *stack) {
+  if (!stack || !stack->next) {
+    runtime_error("string_equal: stack underflow");
+  }
+  if (stack->tag != TAG_STRING || stack->next->tag != TAG_STRING) {
+    runtime_error("string_equal: expected two strings on stack");
+  }
 
-    // NULL pointer checks
-    if (!stack->value.s || !stack->next->value.s) {
-        runtime_error("string_equal: NULL string pointer");
-    }
+  // NULL pointer checks
+  if (!stack->value.s || !stack->next->value.s) {
+    runtime_error("string_equal: NULL string pointer");
+  }
 
-    // Compare strings
-    bool result = (strcmp(stack->value.s, stack->next->value.s) == 0);
+  // Compare strings
+  bool result = (strcmp(stack->value.s, stack->next->value.s) == 0);
 
-    // Pop both strings
-    StackCell* rest = stack->next->next;
-    free_cell(stack->next);
-    free_cell(stack);
+  // Pop both strings
+  StackCell *rest = stack->next->next;
+  free_cell(stack->next);
+  free_cell(stack);
 
-    return push_bool(rest, result);
+  return push_bool(rest, result);
 }
 
 // ============================================================================
 // Control Flow Operations (Placeholders)
 // ============================================================================
 
-StackCell* call_quotation(StackCell* stack) {
-    if (!stack) {
-        runtime_error("call_quotation: stack underflow");
-    }
-    if (stack->tag != TAG_QUOTATION) {
-        runtime_error("call_quotation: expected quotation on top of stack");
-    }
+StackCell *call_quotation(StackCell *stack) {
+  if (!stack) {
+    runtime_error("call_quotation: stack underflow");
+  }
+  if (stack->tag != TAG_QUOTATION) {
+    runtime_error("call_quotation: expected quotation on top of stack");
+  }
 
-    // Pop the quotation
-    void* func_ptr = stack->value.quotation;
-    StackCell* rest = stack->next;
-    free(stack);
+  // Pop the quotation
+  void *func_ptr = stack->value.quotation;
+  StackCell *rest = stack->next;
+  free(stack);
 
-    // Call the function pointer with the rest of the stack
-    // The function has signature: StackCell* (*)(StackCell*)
-    typedef StackCell* (*QuotationFunc)(StackCell*);
-    QuotationFunc func = (QuotationFunc)func_ptr;
-    return func(rest);
+  // Call the function pointer with the rest of the stack
+  // The function has signature: StackCell* (*)(StackCell*)
+  typedef StackCell *(*QuotationFunc)(StackCell *);
+  QuotationFunc func = (QuotationFunc)func_ptr;
+  return func(rest);
 }
 
-StackCell* if_then_else(StackCell* stack) {
-    // TODO: Implement when control flow is supported
-    runtime_error("if_then_else: not yet implemented");
-    return stack;
+StackCell *if_then_else(StackCell *stack) {
+  // TODO: Implement when control flow is supported
+  runtime_error("if_then_else: not yet implemented");
+  return stack;
 }

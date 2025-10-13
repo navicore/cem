@@ -9,7 +9,8 @@
  * - Each strand has its own isolated stack (StackCell linked list)
  * - Strands yield only at I/O operations (cooperative, not preemptive)
  * - Simple FIFO ready queue for runnable strands
- * - Fast context switching via custom assembly (cem_makecontext/cem_swapcontext)
+ * - Fast context switching via custom assembly
+ * (cem_makecontext/cem_swapcontext)
  *
  * IMPLEMENTATION PHASES:
  * =======================
@@ -45,12 +46,12 @@
 #ifndef CEM_RUNTIME_SCHEDULER_H
 #define CEM_RUNTIME_SCHEDULER_H
 
-#include "stack.h"
 #include "context.h"
+#include "stack.h"
 #include "stack_mgmt.h"
-#include <stdint.h>
-#include <stddef.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 // ============================================================================
 // Cleanup Handlers
@@ -64,19 +65,19 @@
  *
  * @param arg - Arbitrary data passed to the cleanup function
  */
-typedef void (*CleanupFunc)(void* arg);
+typedef void (*CleanupFunc)(void *arg);
 
 /**
  * Cleanup handler node
  *
  * Cleanup handlers are stored in a LIFO linked list (stack order).
- * When a strand terminates, handlers are called in reverse order of registration
- * (most recently registered first).
+ * When a strand terminates, handlers are called in reverse order of
+ * registration (most recently registered first).
  */
 typedef struct CleanupHandler {
-    CleanupFunc func;              // Function to call on cleanup
-    void* arg;                     // Argument to pass to function
-    struct CleanupHandler* next;   // Next handler in list
+  CleanupFunc func;            // Function to call on cleanup
+  void *arg;                   // Argument to pass to function
+  struct CleanupHandler *next; // Next handler in list
 } CleanupHandler;
 
 // ============================================================================
@@ -87,12 +88,12 @@ typedef struct CleanupHandler {
  * Strand execution states
  */
 typedef enum {
-    STRAND_READY,          // Ready to run (in ready queue)
-    STRAND_RUNNING,        // Currently executing
-    STRAND_YIELDED,        // Yielded (will be re-queued)
-    STRAND_COMPLETED,      // Finished execution
-    STRAND_BLOCKED_READ,   // Blocked waiting for readable I/O
-    STRAND_BLOCKED_WRITE,  // Blocked waiting for writable I/O
+  STRAND_READY,         // Ready to run (in ready queue)
+  STRAND_RUNNING,       // Currently executing
+  STRAND_YIELDED,       // Yielded (will be re-queued)
+  STRAND_COMPLETED,     // Finished execution
+  STRAND_BLOCKED_READ,  // Blocked waiting for readable I/O
+  STRAND_BLOCKED_WRITE, // Blocked waiting for writable I/O
 } StrandState;
 
 /**
@@ -114,24 +115,25 @@ typedef enum {
  * - With 10,000 strands: ~43MB (vs 640MB in Phase 2b!)
  */
 typedef struct Strand {
-    uint64_t id;              // Unique strand identifier
-    StrandState state;        // Current execution state
-    StackCell* stack;         // Strand's isolated Cem stack
-    cem_context_t context;    // Execution context for context switching
+  uint64_t id;           // Unique strand identifier
+  StrandState state;     // Current execution state
+  StackCell *stack;      // Strand's isolated Cem stack
+  cem_context_t context; // Execution context for context switching
 
-    // Phase 3: Dynamic stack with guard page
-    StackMetadata* stack_meta;  // Dynamic stack metadata (replaces c_stack/c_stack_size)
+  // Phase 3: Dynamic stack with guard page
+  StackMetadata
+      *stack_meta; // Dynamic stack metadata (replaces c_stack/c_stack_size)
 
-    // Entry function (for initial context setup)
-    StackCell* (*entry_func)(StackCell*);  // Entry function for this strand
+  // Entry function (for initial context setup)
+  StackCell *(*entry_func)(StackCell *); // Entry function for this strand
 
-    // Cleanup handlers (for resource management)
-    CleanupHandler* cleanup_handlers;  // LIFO list of cleanup handlers
+  // Cleanup handlers (for resource management)
+  CleanupHandler *cleanup_handlers; // LIFO list of cleanup handlers
 
-    // I/O blocking state
-    int blocked_fd;           // File descriptor when blocked on I/O (-1 if not blocked)
+  // I/O blocking state
+  int blocked_fd; // File descriptor when blocked on I/O (-1 if not blocked)
 
-    struct Strand* next;      // Next strand in queue (linked list)
+  struct Strand *next; // Next strand in queue (linked list)
 } Strand;
 
 // ============================================================================
@@ -153,18 +155,18 @@ typedef struct Strand {
  * from a single thread, so no locks are needed.
  */
 typedef struct Scheduler {
-    Strand* ready_queue_head;   // Head of ready queue (FIFO)
-    Strand* ready_queue_tail;   // Tail of ready queue (FIFO)
-    Strand* blocked_list;       // Linked list of strands blocked on I/O
-    Strand* current_strand;     // Currently executing strand
-    uint64_t next_strand_id;    // Counter for strand IDs
-    cem_context_t scheduler_context; // Scheduler's main context
-    
-    // Platform-specific I/O multiplexing
+  Strand *ready_queue_head;        // Head of ready queue (FIFO)
+  Strand *ready_queue_tail;        // Tail of ready queue (FIFO)
+  Strand *blocked_list;            // Linked list of strands blocked on I/O
+  Strand *current_strand;          // Currently executing strand
+  uint64_t next_strand_id;         // Counter for strand IDs
+  cem_context_t scheduler_context; // Scheduler's main context
+
+  // Platform-specific I/O multiplexing
 #if defined(__linux__)
-    int epoll_fd;               // epoll descriptor for async I/O (-1 if not initialized)
+  int epoll_fd; // epoll descriptor for async I/O (-1 if not initialized)
 #else
-    int kqueue_fd;              // kqueue descriptor for async I/O (-1 if not initialized)
+  int kqueue_fd; // kqueue descriptor for async I/O (-1 if not initialized)
 #endif
 } Scheduler;
 
@@ -193,7 +195,8 @@ void scheduler_shutdown(void);
  * @param initial_stack - Initial stack state for the strand
  * @return Strand ID
  */
-uint64_t strand_spawn(StackCell* (*entry_func)(StackCell*), StackCell* initial_stack);
+uint64_t strand_spawn(StackCell *(*entry_func)(StackCell *),
+                      StackCell *initial_stack);
 
 /**
  * Register a cleanup handler for the current strand
@@ -210,7 +213,7 @@ uint64_t strand_spawn(StackCell* (*entry_func)(StackCell*), StackCell* initial_s
  * @param func - Cleanup function to call
  * @param arg - Argument to pass to cleanup function
  */
-void strand_push_cleanup(CleanupFunc func, void* arg);
+void strand_push_cleanup(CleanupFunc func, void *arg);
 
 /**
  * Remove the most recently registered cleanup handler
@@ -227,13 +230,14 @@ void strand_pop_cleanup(void);
  *
  * This is useful when a resource pointer changes (e.g., after realloc)
  * but the cleanup function remains the same. This is safer than pop+push
- * because it ensures the cleanup handler is never unregistered during the update.
+ * because it ensures the cleanup handler is never unregistered during the
+ * update.
  *
  * IMPORTANT: This must only be called from within a strand.
  *
  * @param new_arg - New argument to pass to the cleanup function
  */
-void strand_update_cleanup_arg(void* new_arg);
+void strand_update_cleanup_arg(void *new_arg);
 
 /**
  * Yield execution from the current strand back to the scheduler
@@ -280,7 +284,7 @@ void strand_block_on_write(int fd);
  *
  * @return Final stack state (from main strand, if any)
  */
-StackCell* scheduler_run(void);
+StackCell *scheduler_run(void);
 
 // ============================================================================
 // Testing & Debug Operations
@@ -295,7 +299,7 @@ StackCell* scheduler_run(void);
  * Usage in Cem: `test_yield`
  * Stack effect: ( -- )
  */
-StackCell* test_yield(StackCell* stack);
+StackCell *test_yield(StackCell *stack);
 
 /**
  * Print scheduler state (for debugging)
@@ -309,13 +313,13 @@ void scheduler_debug_print(void);
 /**
  * Enqueue a strand to the ready queue
  */
-void ready_queue_push(Strand* strand);
+void ready_queue_push(Strand *strand);
 
 /**
  * Dequeue a strand from the ready queue
  * Returns NULL if queue is empty
  */
-Strand* ready_queue_pop(void);
+Strand *ready_queue_pop(void);
 
 /**
  * Check if ready queue is empty

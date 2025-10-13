@@ -4,7 +4,8 @@ Type checking errors for Cem
 use crate::ast::types::{Effect, StackType, Type};
 use std::fmt;
 
-pub type TypeResult<T> = Result<T, TypeError>;
+// Box the error type to reduce stack size (clippy::result_large_err)
+pub type TypeResult<T> = Result<T, Box<TypeError>>;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeError {

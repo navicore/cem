@@ -1,7 +1,6 @@
 /**
 Error types for code generation
 */
-
 use std::fmt;
 
 /// Errors that can occur during code generation

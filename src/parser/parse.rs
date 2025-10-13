@@ -1,5 +1,4 @@
 /// Recursive descent parser for Cem
-
 use crate::ast::types::{Effect, Type};
 use crate::ast::{Expr, MatchBranch, Pattern, Program, TypeDef, Variant, WordDef};
 use crate::parser::lexer::{Lexer, Token, TokenKind};
@@ -15,7 +14,11 @@ pub struct ParseError {
 
 impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Parse error at {}:{}: {}", self.line, self.column, self.message)
+        write!(
+            f,
+            "Parse error at {}:{}: {}",
+            self.line, self.column, self.message
+        )
     }
 }
 
@@ -145,7 +148,10 @@ impl Parser {
         // Parse effect signature
         self.consume(&TokenKind::LeftParen, "Expected '(' for effect signature")?;
         let effect = self.parse_effect()?;
-        self.consume(&TokenKind::RightParen, "Expected ')' after effect signature")?;
+        self.consume(
+            &TokenKind::RightParen,
+            "Expected ')' after effect signature",
+        )?;
 
         // Parse body until ';'
         let mut body = Vec::new();
@@ -199,9 +205,10 @@ impl Parser {
                 // Check if it's a generic type variable (single uppercase letter or starts with lowercase)
                 let first_char = name.chars().next();
 
-                if name.len() == 1 && first_char.map_or(false, |c| c.is_uppercase()) {
-                    Ok(Type::Var(name))
-                } else if first_char.map_or(false, |c| c.is_lowercase()) {
+                // Single uppercase letter or lowercase name = type variable
+                if (name.len() == 1 && first_char.is_some_and(|c| c.is_uppercase()))
+                    || first_char.is_some_and(|c| c.is_lowercase())
+                {
                     Ok(Type::Var(name))
                 } else {
                     // Named type, possibly with type arguments
@@ -551,8 +558,10 @@ mod tests {
         // Verify all locations point to the same Arc<str> instance
         // (Arc::ptr_eq checks if they point to the same allocation)
         for i in 1..locs.len() {
-            assert!(Arc::ptr_eq(&locs[0].file, &locs[i].file),
-                "SourceLoc filenames should share the same Arc allocation");
+            assert!(
+                Arc::ptr_eq(&locs[0].file, &locs[i].file),
+                "SourceLoc filenames should share the same Arc allocation"
+            );
         }
     }
 

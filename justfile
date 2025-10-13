@@ -46,6 +46,55 @@ lint:
 fmt:
     cargo fmt
 
+# Check formatting without modifying
+fmt-check:
+    cargo fmt --all -- --check
+
+# Format C code
+fmt-c:
+    @echo "Formatting C code..."
+    @find runtime -name "*.c" -o -name "*.h" | xargs clang-format -i
+    @echo "✅ C code formatted"
+
+# Check C formatting  
+fmt-c-check:
+    #!/usr/bin/env bash
+    echo "Checking C code formatting..."
+    CHANGED=0
+    for file in runtime/*.c runtime/*.h; do
+        if [ -f "$file" ]; then
+            if ! diff -q "$file" <(clang-format "$file") > /dev/null 2>&1; then
+                echo "❌ $file needs formatting"
+                CHANGED=1
+            fi
+        fi
+    done
+    if [ $CHANGED -eq 0 ]; then
+        echo "✅ C formatting check passed"
+    else
+        echo ""
+        echo "Run: just fmt-c to fix"
+        exit 1
+    fi
+
+# Run clang-tidy on C code
+lint-c:
+    @echo "Running clang-tidy..."
+    @find runtime -name "*.c" | while read file; do \
+        clang-tidy "$$file" -- -std=c11 -Iruntime || { \
+            echo "⚠️  clang-tidy found issues in $$file (continuing...)"; \
+        }; \
+    done
+    @echo "✅ clang-tidy completed"
+
+# Run all linting (matches CI)
+lint-all: fmt-check fmt-c-check lint
+    @echo "✅ All linting passed!"
+
+# Fix all formatting issues
+fix-fmt: fmt fmt-c
+    @echo "✅ All code formatted!"
+
 # Clean build artifacts
 clean:
     cargo clean
@@ -105,8 +154,12 @@ bench:
     cargo bench
 
 # Full CI check (what CI will run)
-ci: fmt lint test
+ci: lint-all test build-runtime test-context
     @echo "✅ All CI checks passed!"
+
+# Quick pre-commit check
+pre-commit: fix-fmt lint test
+    @echo "✅ Ready to commit!"
 
 # Build the C runtime library
 build-runtime:

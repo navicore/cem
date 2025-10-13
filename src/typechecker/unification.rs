@@ -42,19 +42,19 @@ fn unify_types_with_subst(ty1: &Type, ty2: &Type, subst: &mut Substitution) -> T
         // Named types (ADTs) must have same name and compatible args
         (Type::Named { name: n1, args: a1 }, Type::Named { name: n2, args: a2 }) => {
             if n1 != n2 {
-                return Err(TypeError::UnificationError {
+                return Err(Box::new(TypeError::UnificationError {
                     ty1: ty1.clone(),
                     ty2: ty2.clone(),
                     reason: format!("Type names don't match: {} vs {}", n1, n2),
-                });
+                }));
             }
 
             if a1.len() != a2.len() {
-                return Err(TypeError::UnificationError {
+                return Err(Box::new(TypeError::UnificationError {
                     ty1: ty1.clone(),
                     ty2: ty2.clone(),
-                    reason: format!("Different number of type arguments"),
-                });
+                    reason: "Different number of type arguments".to_string(),
+                }));
             }
 
             // Unify all type arguments
@@ -73,11 +73,11 @@ fn unify_types_with_subst(ty1: &Type, ty2: &Type, subst: &mut Substitution) -> T
         }
 
         // Mismatched types
-        _ => Err(TypeError::UnificationError {
+        _ => Err(Box::new(TypeError::UnificationError {
             ty1: ty1.clone(),
             ty2: ty2.clone(),
             reason: "Types are incompatible".to_string(),
-        }),
+        })),
     }
 }
 
@@ -128,11 +128,11 @@ fn unify_stack_types_with_subst(
         }
 
         // Mismatched stacks
-        _ => Err(TypeError::StackUnificationError {
+        _ => Err(Box::new(TypeError::StackUnificationError {
             stack1: stack1.clone(),
             stack2: stack2.clone(),
             reason: "Stack shapes are incompatible".to_string(),
-        }),
+        })),
     }
 }
 

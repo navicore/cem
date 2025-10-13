@@ -1,7 +1,6 @@
 /// Lexer for Cem
 ///
 /// Tokenizes Cem source code into a stream of tokens.
-
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -20,20 +19,20 @@ pub enum TokenKind {
     BoolLiteral,
 
     // Keywords
-    Type,        // type
-    Colon,       // :
-    Pipe,        // |
-    Match,       // match
-    End,         // end
-    If,          // if
-    Arrow,       // =>
+    Type,  // type
+    Colon, // :
+    Pipe,  // |
+    Match, // match
+    End,   // end
+    If,    // if
+    Arrow, // =>
 
     // Delimiters
-    LeftParen,   // (
-    RightParen,  // )
-    LeftBracket, // [
+    LeftParen,    // (
+    RightParen,   // )
+    LeftBracket,  // [
     RightBracket, // ]
-    Dash,        // --
+    Dash,         // --
 
     // Identifier (word name, type name, variant name)
     Ident,
@@ -141,7 +140,7 @@ impl Lexer {
                         line: start_line,
                         column: start_column,
                     };
-                } else if self.peek_next().map_or(false, |c| c.is_ascii_digit()) {
+                } else if self.peek_next().is_some_and(|c| c.is_ascii_digit()) {
                     // It's a negative number
                     return self.number_literal();
                 } else {
@@ -170,7 +169,9 @@ impl Lexer {
             }
             '"' => return self.string_literal(),
             _ => {
-                if c.is_ascii_digit() || (c == '-' && self.peek_next().map_or(false, |n| n.is_ascii_digit())) {
+                if c.is_ascii_digit()
+                    || (c == '-' && self.peek_next().is_some_and(|n| n.is_ascii_digit()))
+                {
                     return self.number_literal();
                 } else if c.is_alphabetic() || c == '_' || is_operator_char(c) {
                     return self.identifier_or_keyword();
@@ -241,7 +242,10 @@ impl Lexer {
                 // Return error token
                 return Token {
                     kind: TokenKind::Ident, // Use Ident for errors
-                    lexeme: format!("ERROR: String exceeds maximum length of {} bytes", MAX_STRING_LENGTH),
+                    lexeme: format!(
+                        "ERROR: String exceeds maximum length of {} bytes",
+                        MAX_STRING_LENGTH
+                    ),
                     line: start_line,
                     column: start_column,
                 };
