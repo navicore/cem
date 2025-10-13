@@ -5,20 +5,25 @@ End-to-end integration test: Cem source → LLVM IR → executable
 use cemc::ast::{Expr, Program, SourceLoc, WordDef};
 use cemc::codegen::{CodeGen, compile_to_object, link_program};
 use std::process::Command;
+use std::sync::Once;
+
+static INIT: Once = Once::new();
+
+/// Build the runtime once for all tests
+fn ensure_runtime_built() {
+    INIT.call_once(|| {
+        let status = Command::new("just")
+            .arg("build-runtime")
+            .status()
+            .expect("Failed to execute just build-runtime");
+
+        assert!(status.success(), "Runtime build failed");
+    });
+}
 
 #[test]
-#[cfg_attr(
-    target_os = "linux",
-    ignore = "Pre-existing test failure (not epoll-related)"
-)]
 fn test_end_to_end_compilation() {
-    // Build the runtime first
-    let runtime_status = Command::new("just")
-        .arg("build-runtime")
-        .status()
-        .expect("Failed to build runtime");
-
-    assert!(runtime_status.success(), "Runtime build failed");
+    ensure_runtime_built();
 
     // Create a simple program: : fortytwo ( -- Int ) 42 ;
     let word = WordDef {
@@ -56,18 +61,9 @@ fn test_end_to_end_compilation() {
 }
 
 #[test]
-#[cfg_attr(
-    target_os = "linux",
-    ignore = "Pre-existing test failure (not epoll-related)"
-)]
 fn test_arithmetic_compilation() {
     // Build runtime
-    let runtime_status = Command::new("just")
-        .arg("build-runtime")
-        .status()
-        .expect("Failed to build runtime");
-
-    assert!(runtime_status.success());
+    ensure_runtime_built();
 
     // : eight ( -- Int ) 5 3 + ;
     let word = WordDef {
@@ -106,18 +102,9 @@ fn test_arithmetic_compilation() {
 }
 
 #[test]
-#[cfg_attr(
-    target_os = "linux",
-    ignore = "Pre-existing test failure (not epoll-related)"
-)]
 fn test_executable_with_main() {
     // Build runtime
-    let runtime_status = Command::new("just")
-        .arg("build-runtime")
-        .status()
-        .expect("Failed to build runtime");
-
-    assert!(runtime_status.success());
+    ensure_runtime_built();
 
     // : fortytwo ( -- Int ) 42 ;
     let word = WordDef {
@@ -162,18 +149,9 @@ fn test_executable_with_main() {
 }
 
 #[test]
-#[cfg_attr(
-    target_os = "linux",
-    ignore = "Pre-existing test failure (not epoll-related)"
-)]
 fn test_multiply_executable() {
     // Build runtime
-    let runtime_status = Command::new("just")
-        .arg("build-runtime")
-        .status()
-        .expect("Failed to build runtime");
-
-    assert!(runtime_status.success());
+    ensure_runtime_built();
 
     // : product ( -- Int ) 6 7 * ;
     let word = WordDef {
@@ -215,18 +193,9 @@ fn test_multiply_executable() {
 }
 
 #[test]
-#[cfg_attr(
-    target_os = "linux",
-    ignore = "Pre-existing test failure (not epoll-related)"
-)]
 fn test_if_expression() {
     // Build runtime
-    let runtime_status = Command::new("just")
-        .arg("build-runtime")
-        .status()
-        .expect("Failed to build runtime");
-
-    assert!(runtime_status.success());
+    ensure_runtime_built();
 
     // : abs ( Int -- Int ) dup 0 < if [ 0 swap - ] [ ] ;
     // Simplified: : test_if ( -- Int ) true if [ 42 ] [ 0 ] ;
@@ -286,18 +255,9 @@ fn test_if_expression() {
 }
 
 #[test]
-#[cfg_attr(
-    target_os = "linux",
-    ignore = "Pre-existing test failure (not epoll-related)"
-)]
 fn test_tail_call_optimization() {
     // Build runtime
-    let runtime_status = Command::new("just")
-        .arg("build-runtime")
-        .status()
-        .expect("Failed to build runtime");
-
-    assert!(runtime_status.success());
+    ensure_runtime_built();
 
     // Create a simple tail-recursive word that calls itself
     // : identity ( Int -- Int ) ;  (just returns input)
@@ -356,18 +316,9 @@ fn test_tail_call_optimization() {
 }
 
 #[test]
-#[cfg_attr(
-    target_os = "linux",
-    ignore = "Pre-existing test failure (not epoll-related)"
-)]
 fn test_if_false_branch() {
     // Build runtime
-    let runtime_status = Command::new("just")
-        .arg("build-runtime")
-        .status()
-        .expect("Failed to build runtime");
-
-    assert!(runtime_status.success());
+    ensure_runtime_built();
 
     // : test_if_false ( -- Int ) false if [ 42 ] [ 99 ] ;
     // Should take the else branch and return 99
@@ -420,18 +371,9 @@ fn test_if_false_branch() {
 }
 
 #[test]
-#[cfg_attr(
-    target_os = "linux",
-    ignore = "Pre-existing test failure (not epoll-related)"
-)]
 fn test_tail_call_in_if_branch() {
     // Build runtime
-    let runtime_status = Command::new("just")
-        .arg("build-runtime")
-        .status()
-        .expect("Failed to build runtime");
-
-    assert!(runtime_status.success());
+    ensure_runtime_built();
 
     // Create a helper word that just returns its input
     // : passthrough ( Int -- Int ) ;
@@ -525,18 +467,9 @@ fn test_tail_call_in_if_branch() {
 }
 
 #[test]
-#[cfg_attr(
-    target_os = "linux",
-    ignore = "Pre-existing test failure (not epoll-related)"
-)]
 fn test_nested_if_expressions() {
     // Build runtime
-    let runtime_status = Command::new("just")
-        .arg("build-runtime")
-        .status()
-        .expect("Failed to build runtime");
-
-    assert!(runtime_status.success());
+    ensure_runtime_built();
 
     // Create a word with nested if expressions:
     // : nested_if ( Bool Bool -- Int )
@@ -641,18 +574,9 @@ fn test_nested_if_expressions() {
 }
 
 #[test]
-#[cfg_attr(
-    target_os = "linux",
-    ignore = "Pre-existing test failure (not epoll-related)"
-)]
 fn test_scheduler_linkage() {
     // Build runtime
-    let runtime_status = Command::new("just")
-        .arg("build-runtime")
-        .status()
-        .expect("Failed to build runtime");
-
-    assert!(runtime_status.success());
+    ensure_runtime_built();
 
     // : test_scheduler ( -- Int )
     //   5 test_yield 10 add ;
