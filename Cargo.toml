@@ -1,7 +1,28 @@
 [package]
-name = "cem"
+name = "cemc"
 version = "0.1.0"
 edition = "2024"
+authors = ["Ed Sweeney <ed@onextent.com>"]
+description = "Cem language compiler - A concatenative language with green threads and linear types"
+license = "MIT"
+repository = "https://github.com/navicore/cem"
+homepage = "https://github.com/navicore/cem"
+documentation = "https://github.com/navicore/cem"
+readme = "README.md"
+keywords = ["compiler", "concatenative", "green-threads", "llvm", "linear-types"]
+categories = ["compilers", "concurrency", "development-tools"]
+exclude = [
+    "target/",
+    "runtime/*.o",
+    "runtime/*.a",
+    "tests/test_*",
+    "*_exe",
+    "*.ll",
+]
+
+[[bin]]
+name = "cem"
+path = "src/main.rs"
 
 [dependencies]
 # No external dependencies! We generate LLVM IR as text and call clang directly.
