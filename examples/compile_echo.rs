@@ -5,7 +5,7 @@ use cemc::ast::types::{Effect, StackType};
  * : echo ( -- ) read_line write_line ;
  */
 use cemc::ast::{Expr, Program, SourceLoc, WordDef};
-use cemc::codegen::{link_program, CodeGen};
+use cemc::codegen::{CodeGen, link_program};
 use std::process::Command;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
