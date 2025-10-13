@@ -32,8 +32,7 @@ enum Commands {
         keep_ir: bool,
     },
 
-    /// Generate shell completions
-    #[command(hide = true)]
+    /// Generate shell completions for bash, zsh, fish, or powershell
     Completions {
         /// Shell to generate completions for
         #[arg(value_enum)]

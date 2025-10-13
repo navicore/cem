@@ -161,20 +161,33 @@ The text IR approach ensures LLVM version compatibility is never an issue.
 
 ## Shell Completions
 
-Generate shell completions for the `cem` command:
+The `cem` command supports tab completion for bash, zsh, fish, and PowerShell.
+
+**List available shells:**
+```bash
+cem completions --help
+```
+
+**Generate and install completions:**
 
 ```bash
 # Bash
+mkdir -p ~/.local/share/bash-completion/completions
 cem completions bash > ~/.local/share/bash-completion/completions/cem
 
-# Zsh
+# Zsh (create directory if it doesn't exist)
+mkdir -p ~/.zsh/completions
 cem completions zsh > ~/.zsh/completions/_cem
+# Add to ~/.zshrc if not already there:
+# fpath=(~/.zsh/completions $fpath)
+# autoload -Uz compinit && compinit
 
 # Fish
+mkdir -p ~/.config/fish/completions
 cem completions fish > ~/.config/fish/completions/cem.fish
 
-# PowerShell
-cem completions powershell > cem.ps1
+# PowerShell (add to your profile)
+cem completions powershell | Out-File -FilePath $PROFILE -Append
 ```
 
 Restart your shell or source the completion file to enable tab completion.
