@@ -98,7 +98,7 @@ fix-fmt: fmt fmt-c
 # Clean build artifacts
 clean:
     cargo clean
-    rm -f *.o *.ll echo hello_io test_call test_dbg test_nested_if_debug
+    rm -f *.o *.ll *_exe echo hello_io test_call test_dbg test_nested_if_debug
     @echo "✅ Cleaned build artifacts"
 
 # Run the compiler (when main is implemented)

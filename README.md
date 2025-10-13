@@ -144,6 +144,27 @@ cargo run --example compile_hello_io
 ./hello_io
 ```
 
+## Development
+
+### Running Tests
+```bash
+# Run all tests
+just ci
+
+# Individual checks
+cargo test          # Rust tests
+just test-context   # C context switching tests
+cargo clippy        # Linting
+cargo fmt --check   # Formatting
+```
+
+### Before Committing
+```bash
+just pre-commit    # Fix formatting + run all checks
+```
+
+All CI checks run the same `just` commands, so if `just ci` passes locally, CI will pass on GitHub.
+
 ## Debugging
 
 Cem binaries work with standard debuggers (LLDB/GDB) out of the box. You can step through runtime code, set breakpoints, and inspect memory. For Cem-specific debugging features (stack visualization, quotation inspection), see [docs/development/DEBUGGING.md](docs/development/DEBUGGING.md).

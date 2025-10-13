@@ -122,12 +122,8 @@ jobs:
       - name: Run Rust tests
         run: cargo test --verbose
       
-      - name: Run context switching tests
-        run: |
-          clang -Wall -Wextra -std=c11 -g tests/test_context.c \
-                runtime/stack.o runtime/context.o runtime/context_x86_64.o \
-                -o tests/test_context
-          ./tests/test_context
+      - name: Run C context switching tests
+        run: just test-context
       
       - name: Check build artifacts
         run: |
@@ -171,12 +167,8 @@ jobs:
       - name: Run Rust tests
         run: cargo test --verbose
       
-      - name: Run context switching tests
-        run: |
-          clang -Wall -Wextra -std=c11 -g tests/test_context.c \
-                runtime/stack.o runtime/context.o runtime/context_arm64.o \
-                -o tests/test_context
-          ./tests/test_context
+      - name: Run C context switching tests
+        run: just test-context
       
       - name: Check build artifacts
         run: |
