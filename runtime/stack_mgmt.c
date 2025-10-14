@@ -485,7 +485,31 @@ bool stack_grow(struct Strand *strand, size_t new_usable_size,
     // Translate old frame pointer to new stack location
     uintptr_t new_frame_ptr = frame_ptr + stack_offset;
 
+    // Validate new frame pointer is within new stack bounds
+    uintptr_t new_usable_base = (uintptr_t)new_meta->usable_base;
+    if (new_frame_ptr < new_usable_base || new_frame_ptr > new_stack_top) {
+      // New frame pointer outside new stack - should not happen
+      if (!in_signal_handler) {
+        fprintf(stderr,
+                "WARNING: x86-64 stack walk: translated frame pointer %p "
+                "outside new stack [%p, %p] (frame %d)\n",
+                (void *)new_frame_ptr, (void *)new_usable_base,
+                (void *)new_stack_top, frame_count);
+      }
+      break;
+    }
+
     // Read return address at [rbp+8] in the NEW stack
+    // Make sure [rbp+8] is also within bounds
+    if (new_frame_ptr + 8 > new_stack_top) {
+      if (!in_signal_handler) {
+        fprintf(stderr,
+                "WARNING: x86-64 stack walk: return address location %p "
+                "outside new stack (frame %d)\n",
+                (void *)(new_frame_ptr + 8), frame_count);
+      }
+      break;
+    }
     uintptr_t *return_addr_ptr = (uintptr_t *)(new_frame_ptr + 8);
     uintptr_t return_addr = *return_addr_ptr;
 
@@ -522,7 +546,7 @@ bool stack_grow(struct Strand *strand, size_t new_usable_size,
 
     // The saved frame pointer still points to the OLD stack (from memcpy).
     // We need to adjust it to point to the NEW stack.
-    uintptr_t next_frame_ptr;  // The frame pointer to use for next iteration
+    uintptr_t next_frame_ptr; // The frame pointer to use for next iteration
     if (prev_frame_old != 0) {
       // Check if the saved frame pointer points into the old stack
       if (prev_frame_old >= (uintptr_t)old_meta->usable_base &&
@@ -562,9 +586,9 @@ bool stack_grow(struct Strand *strand, size_t new_usable_size,
   }
 
   if (frame_count >= MAX_FRAMES && !in_signal_handler) {
-    fprintf(stderr,
-            "WARNING: x86-64 stack walk hit frame limit (%d frames)\n",
-            MAX_FRAMES);
+    fprintf(
+        stderr, "WARNING: x86-64 stack walk hit frame limit (%d frames)\n",
+        MAX_FRAMES);
   }
 
 #else
