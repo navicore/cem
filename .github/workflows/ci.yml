@@ -122,6 +122,15 @@ jobs:
       - name: Run Rust tests
         run: just test-verbose
 
+      - name: Check environment (debugging CI failure)
+        run: |
+          echo "=== Stack limits ==="
+          ulimit -a
+          echo "=== Kernel version ==="
+          uname -a
+          echo "=== CPU info ==="
+          lscpu | head -20
+
       - name: Run all runtime C tests
         run: just test-all-runtime
 
