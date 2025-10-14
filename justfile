@@ -168,11 +168,11 @@ pre-commit: fix-fmt lint test
 # Build the C runtime library
 build-runtime:
     @echo "Building C runtime library..."
-    cd runtime && clang -Wall -Wextra -std=c11 -g -O2 -c stack.c -o stack.o
-    cd runtime && clang -Wall -Wextra -std=c11 -g -O2 -c context.c -o context.o
-    cd runtime && clang -Wall -Wextra -std=c11 -g -O2 -c scheduler.c -o scheduler.o
-    cd runtime && clang -Wall -Wextra -std=c11 -g -O2 -c io.c -o io.o
-    cd runtime && clang -Wall -Wextra -std=c11 -g -O2 -c stack_mgmt.c -o stack_mgmt.o
+    cd runtime && clang -Wall -Wextra -std=c11 -g -O2 -fno-omit-frame-pointer -c stack.c -o stack.o
+    cd runtime && clang -Wall -Wextra -std=c11 -g -O2 -fno-omit-frame-pointer -c context.c -o context.o
+    cd runtime && clang -Wall -Wextra -std=c11 -g -O2 -fno-omit-frame-pointer -c scheduler.c -o scheduler.o
+    cd runtime && clang -Wall -Wextra -std=c11 -g -O2 -fno-omit-frame-pointer -c io.c -o io.o
+    cd runtime && clang -Wall -Wextra -std=c11 -g -O2 -fno-omit-frame-pointer -c stack_mgmt.c -o stack_mgmt.o
     #!/usr/bin/env bash
     if [ "{{arch()}}" = "aarch64" ] || [ "{{arch()}}" = "arm64" ]; then \
         echo "Building for ARM64..."; \

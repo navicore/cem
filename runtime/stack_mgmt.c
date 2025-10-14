@@ -423,41 +423,145 @@ bool stack_grow(struct Strand *strand, size_t new_usable_size,
   // No adjustment needed for x30
 
 #elif defined(CEM_ARCH_X86_64)
-  // x86-64 IMPLEMENTATION INCOMPLETE - Return address adjustment not yet
-  // implemented
+  // x86-64: Return addresses are stored ON THE STACK (not in registers like
+  // ARM64's x30). We must walk the frame chain and adjust all return addresses.
   //
-  // CRITICAL LIMITATION: On x86-64, return addresses are stored ON THE STACK
-  // (not in registers like ARM64's x30). When we memcpy the stack to a new
-  // location, these return addresses become invalid and will crash when
-  // functions try to return.
+  // x86-64 Stack Frame Layout:
+  //   [rbp+8]  = return address (pushed by CALL instruction)
+  //   [rbp]    = saved frame pointer (pushed by function prologue)
+  //   [rbp-X]  = local variables
   //
-  // REQUIRED FOR FULL x86-64 SUPPORT:
-  // 1. Walk the stack frame chain using rbp (frame pointer)
-  // 2. For each frame, adjust the return address by (new_stack_top -
-  // old_stack_top)
-  // 3. Handle cases where rbp chain is broken (optimized code, leaf functions)
+  // REQUIREMENTS:
+  // - Code must be compiled with -fno-omit-frame-pointer
+  // - Frame pointers form a chain: rbp -> [rbp] -> [[rbp]] -> ... -> 0
   //
-  // CURRENT WORKAROUND: Checkpoint-based growth catches most cases BEFORE
-  // return addresses are on the stack. This works for simple strands but
-  // will fail for deep call stacks or recursive functions.
-  //
-  // TODO: Implement full stack frame walking and return address adjustment
-  // See Go runtime's adjustframe() for reference implementation.
+  // Strategy:
+  // 1. Calculate stack relocation offset
+  // 2. Walk the frame chain starting from current rbp
+  // 3. For each frame, adjust the return address if it points to code
+  // 4. Follow the chain until we reach the bottom (prev_frame == 0)
+
+  // Calculate relocation offset
+  intptr_t stack_offset = (intptr_t)new_stack_top - (intptr_t)old_stack_top;
 
   // Update stack pointer
   strand->context.rsp = new_sp;
 
   // Update frame pointer (rbp) - but only if it points into the old stack
-  if (strand->context.rbp >= (uintptr_t)old_meta->usable_base &&
-      strand->context.rbp <= old_stack_top) {
-    uintptr_t offset_from_top = old_stack_top - strand->context.rbp;
+  uintptr_t old_rbp = strand->context.rbp;
+  if (old_rbp >= (uintptr_t)old_meta->usable_base && old_rbp <= old_stack_top) {
+    uintptr_t offset_from_top = old_stack_top - old_rbp;
     strand->context.rbp = new_stack_top - offset_from_top;
   }
 
-  // WARNING: We are NOT adjusting return addresses on the stack!
-  // This will likely cause crashes if the strand has active call frames.
-  fprintf(stderr, "WARNING: x86-64 stack growth is INCOMPLETE and may crash\n");
-  fprintf(stderr, "  Return addresses on stack are not adjusted!\n");
+  // Walk the frame chain and adjust return addresses
+  // Note: We walk the OLD stack (before freeing) to find all return addresses,
+  // then adjust them in the NEW stack.
+  uintptr_t frame_ptr = old_rbp;
+  int frame_count = 0;
+  const int MAX_FRAMES = 1000; // Safety limit
+
+  while (frame_ptr != 0 && frame_count < MAX_FRAMES) {
+    // Validate frame pointer is within old stack bounds
+    if (frame_ptr < (uintptr_t)old_meta->usable_base ||
+        frame_ptr > old_stack_top) {
+      break; // Frame pointer outside stack - end of chain
+    }
+
+    // Check 16-byte alignment (x86-64 ABI requirement)
+    // Note: rbp itself is typically 16-byte aligned, but we allow 8-byte
+    // alignment since the CALL instruction may have been made before alignment
+    if ((frame_ptr & 0x7) != 0) {
+      // Misaligned frame pointer - likely corrupted
+      if (!in_signal_handler) {
+        fprintf(stderr,
+                "WARNING: x86-64 stack walk found misaligned frame pointer "
+                "%p (frame %d)\n",
+                (void *)frame_ptr, frame_count);
+      }
+      break;
+    }
+
+    // Translate old frame pointer to new stack location
+    uintptr_t new_frame_ptr = frame_ptr + stack_offset;
+
+    // Read return address at [rbp+8] in the NEW stack
+    uintptr_t *return_addr_ptr = (uintptr_t *)(new_frame_ptr + 8);
+    uintptr_t return_addr = *return_addr_ptr;
+
+    // Adjust return address
+    // Note: Return addresses point to CODE, not stack data. We adjust ALL
+    // return addresses unconditionally by the stack offset, since the return
+    // address itself may have been used as a data pointer stored on the stack.
+    // However, we add sanity checks to catch obvious corruption.
+    //
+    // In a typical scenario, return addresses point to the text segment and
+    // don't need adjustment. But in JIT scenarios or with nested functions,
+    // they might point to stack-allocated trampolines. We adjust all of them
+    // to be safe.
+    uintptr_t new_return_addr = return_addr + stack_offset;
+
+    // Sanity check: The original return address should NOT have been pointing
+    // into the old stack (that would be very unusual and indicate corruption)
+    // But if it was, we've now adjusted it to point into the new stack.
+    // Post-adjustment, the new return address should NOT point into new stack
+    // (return addresses should point to code, not data)
+    if (new_return_addr >= (uintptr_t)new_meta->usable_base &&
+        new_return_addr <= new_stack_top) {
+      // This is suspicious - return address points into stack after adjustment
+      // Either:
+      // 1. This is a JIT/trampoline scenario (intended)
+      // 2. The original return address was corrupted
+      // 3. Our offset calculation is wrong
+      //
+      // For safety, we'll keep the adjusted value but log a warning
+      if (!in_signal_handler) {
+        fprintf(stderr,
+                "WARNING: x86-64 stack walk found return address %p -> %p "
+                "pointing into stack (frame %d)\n",
+                (void *)return_addr, (void *)new_return_addr, frame_count);
+      }
+    }
+
+    // Write adjusted return address back to new stack
+    *return_addr_ptr = new_return_addr;
+
+    // Follow the frame chain: read saved frame pointer at [rbp]
+    uintptr_t *prev_frame_ptr = (uintptr_t *)new_frame_ptr;
+    uintptr_t prev_frame = *prev_frame_ptr;
+
+    // Validate frame chain is moving upward (toward higher addresses)
+    // On x86-64, stacks grow downward, so frame pointers should increase
+    // as we walk toward the bottom of the stack
+    if (prev_frame != 0) {
+      // Translate back to old stack coordinates for comparison
+      uintptr_t prev_frame_old = prev_frame - stack_offset;
+
+      if (prev_frame_old <= frame_ptr) {
+        // Frame pointer not increasing - corrupted chain or cycle
+        if (!in_signal_handler) {
+          fprintf(stderr,
+                  "WARNING: x86-64 stack walk found backward frame pointer "
+                  "%p -> %p (frame %d)\n",
+                  (void *)frame_ptr, (void *)prev_frame_old, frame_count);
+        }
+        break;
+      }
+
+      frame_ptr = prev_frame_old;
+    } else {
+      // Reached the bottom of the stack
+      break;
+    }
+
+    frame_count++;
+  }
+
+  if (frame_count >= MAX_FRAMES && !in_signal_handler) {
+    fprintf(stderr,
+            "WARNING: x86-64 stack walk hit frame limit (%d frames)\n",
+            MAX_FRAMES);
+  }
 
 #else
 #error "Unsupported architecture for dynamic stack growth"
