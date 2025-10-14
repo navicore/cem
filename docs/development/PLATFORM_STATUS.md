@@ -44,13 +44,15 @@ Event notification systems for non-blocking I/O.
 
 Combination of context switching + I/O = fully functional scheduler.
 
-| Platform | Context | I/O | Overall Status |
-|----------|---------|-----|----------------|
-| ARM64 macOS | ✅ | ✅ | ✅ **FULLY SUPPORTED** |
-| x86-64 Linux | ✅ | ✅ | ✅ **FULLY SUPPORTED** ⭐ NEW! |
-| x86-64 macOS | ❌ | ✅ | 🔄 **PARTIAL** (needs context) |
-| ARM64 Linux | ❌ | ✅ | 🔄 **PARTIAL** (needs context) |
-| FreeBSD/OpenBSD/NetBSD (any arch) | Varies | ✅ | 🔄 **PARTIAL** (needs context for each arch) |
+| Platform | Context | I/O | Stack Growth | Overall Status |
+|----------|---------|-----|--------------|----------------|
+| ARM64 macOS | ✅ | ✅ | ✅ | ✅ **FULLY SUPPORTED** |
+| x86-64 Linux | ✅ | ✅ | ⚠️ | ⚠️ **MOSTLY WORKING** (stack growth crashes) |
+| x86-64 macOS | ❌ | ✅ | ⚠️ | 🔄 **PARTIAL** (needs context) |
+| ARM64 Linux | ❌ | ✅ | ✅ | 🔄 **PARTIAL** (needs context) |
+| FreeBSD/OpenBSD/NetBSD (any arch) | Varies | ✅ | Varies | 🔄 **PARTIAL** (needs context for each arch) |
+
+**⚠️ x86-64 Stack Growth Limitation:** See `docs/development/KNOWN_ISSUES.md` for critical bug in x86-64 dynamic stack growth. Context switching and basic functionality work, but stack growth will crash. Use `just test-runtime-x86-safe` for testing.
 
 ## What Just Got Done ✅
 

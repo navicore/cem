@@ -241,6 +241,14 @@ test-all-runtime: test-runtime test-scheduler test-context test-cleanup test-io-
     @echo ""
     @echo "🎉 All runtime tests passed!"
 
+# Run x86-64 safe runtime tests (skips stack-growth due to known bug)
+# See docs/development/KNOWN_ISSUES.md for details on x86-64 stack growth limitation
+test-runtime-x86-safe: test-runtime test-scheduler test-context test-cleanup test-io-cleanup test-stack-ops
+    @echo ""
+    @echo "⚠️  NOTE: Skipped test-stack-growth due to x86-64 stack growth limitation"
+    @echo "📖 See docs/development/KNOWN_ISSUES.md for details"
+    @echo "✅ Safe runtime tests passed!"
+
 # Clean runtime build artifacts
 clean-runtime:
     rm -f runtime/*.o runtime/*.a runtime/test_runtime

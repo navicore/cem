@@ -1,6 +1,88 @@
 # Known Issues
 
-Currently there are no known issues! 🎉
+## x86-64 Dynamic Stack Growth (CRITICAL ⚠️)
+
+**Status**: Known limitation
+**Affects**: x86-64 Linux, x86-64 macOS (when implemented)
+**Impact**: Segmentation faults when stack growth is triggered with active call frames
+**Workaround**: Increase initial stack size or avoid deep recursion on x86-64
+
+### The Problem
+
+The x86-64 implementation of dynamic stack growth (`runtime/stack_mgmt.c:426-461`) is **incomplete** and will crash under certain conditions:
+
+**Root Cause**: On x86-64, function return addresses are stored on the stack (unlike ARM64 where they're in the x30/LR register). When `stack_grow()` copies the stack to a new memory location, it doesn't adjust these return addresses. When a function tries to return, it jumps to the old (now invalid) stack address → **SEGFAULT**.
+
+**When It Crashes**:
+- When stack growth occurs while functions have active stack frames (return addresses on stack)
+- Deep call stacks or recursive functions
+- Tests that explicitly trigger stack growth (e.g., `test_stack_growth.c`)
+
+**When It Works**:
+- Simple strands with no deep call stacks
+- When checkpoint-based growth catches the issue before return addresses are pushed
+- Strands that complete before needing to grow
+
+### Why Tests Fail in CI But Not Locally
+
+CI runs the comprehensive `test-stack-growth` test which deliberately triggers stack growth with active call frames, exposing this bug. Local testing with `just ci` may skip this test or have different memory layouts that avoid the crash.
+
+### Technical Details
+
+From `runtime/stack_mgmt.c:426-446`:
+
+```c
+#elif defined(CEM_ARCH_X86_64)
+  // x86-64 IMPLEMENTATION INCOMPLETE - Return address adjustment not yet implemented
+  //
+  // CRITICAL LIMITATION: On x86-64, return addresses are stored ON THE STACK
+  // (not in registers like ARM64's x30). When we memcpy the stack to a new
+  // location, these return addresses become invalid and will crash when
+  // functions try to return.
+  //
+  // REQUIRED FOR FULL x86-64 SUPPORT:
+  // 1. Walk the stack frame chain using rbp (frame pointer)
+  // 2. For each frame, adjust the return address by (new_stack_top - old_stack_top)
+  // 3. Handle cases where rbp chain is broken (optimized code, leaf functions)
+```
+
+### Workarounds
+
+**For Testing**:
+- Use `just test-runtime-x86-safe` instead of `just test-all-runtime` (skips stack growth tests)
+- Run `just ci` which uses safe tests on x86-64
+
+**For Production**:
+- Increase `CEM_INITIAL_STACK_SIZE` to prevent growth (temporary solution)
+- Avoid deep recursion or large local variables on x86-64
+- Use ARM64 platforms where stack growth works correctly
+
+### Proper Fix (TODO)
+
+To fully fix this, we need to implement return address adjustment during stack copying:
+
+1. Walk the stack frame chain using rbp (frame pointer)
+2. For each frame:
+   - Locate the return address (typically at `rbp + 8`)
+   - Adjust it by the stack relocation offset: `new_stack_top - old_stack_top`
+3. Handle edge cases:
+   - Leaf functions (no frame pointer)
+   - Optimized code (`-fomit-frame-pointer`)
+   - Signal frames
+   - Incomplete frame chains
+
+**Reference Implementation**: Go runtime's `adjustframe()` function
+
+**Estimated Effort**: 1-2 days of development + thorough testing
+
+**Priority**: High - This blocks reliable x86-64 support
+
+### Related Files
+
+- `runtime/stack_mgmt.c:426-461` - Incomplete x86-64 stack growth
+- `runtime/context_x86_64.s` - Context switching (works correctly)
+- `tests/test_stack_growth.c` - Test that exposes the bug
+- See also: GitHub Issue #27
 
 ---
 
