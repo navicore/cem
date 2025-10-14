@@ -459,14 +459,15 @@ bool stack_grow(struct Strand *strand, size_t new_usable_size,
   // then adjust them in the NEW stack.
   //
   // Special case: If rbp is at or very close to stack_top, there's likely no
-  // frame chain established yet (strand just started, makecontext set rbp=stack_top).
-  // In this case, skip frame walking entirely.
+  // frame chain established yet (strand just started, makecontext set
+  // rbp=stack_top). In this case, skip frame walking entirely.
   uintptr_t frame_ptr = old_rbp;
   int frame_count = 0;
   const int MAX_FRAMES = 1000; // Safety limit
 
-  // Check if we have room for at least one frame (need space for [rbp] and [rbp+8])
-  // If rbp + 8 >= stack_top, we're at the very top with no established frames
+  // Check if we have room for at least one frame (need space for [rbp] and
+  // [rbp+8]) If rbp + 8 >= stack_top, we're at the very top with no established
+  // frames
   if (frame_ptr + 8 >= old_stack_top) {
     // No frame chain yet - skip walking
     frame_ptr = 0;
@@ -603,8 +604,7 @@ bool stack_grow(struct Strand *strand, size_t new_usable_size,
   }
 
   if (frame_count >= MAX_FRAMES && !in_signal_handler) {
-    fprintf(stderr,
-            "WARNING: x86-64 stack walk hit frame limit (%d frames)\n",
+    fprintf(stderr, "WARNING: x86-64 stack walk hit frame limit (%d frames)\n",
             MAX_FRAMES);
   }
 
