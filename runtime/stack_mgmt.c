@@ -423,41 +423,105 @@ bool stack_grow(struct Strand *strand, size_t new_usable_size,
   // No adjustment needed for x30
 
 #elif defined(CEM_ARCH_X86_64)
-  // x86-64 IMPLEMENTATION INCOMPLETE - Return address adjustment not yet
-  // implemented
+  // x86-64 IMPLEMENTATION: Adjust return addresses on stack
   //
-  // CRITICAL LIMITATION: On x86-64, return addresses are stored ON THE STACK
-  // (not in registers like ARM64's x30). When we memcpy the stack to a new
-  // location, these return addresses become invalid and will crash when
-  // functions try to return.
+  // On x86-64, return addresses are stored ON THE STACK (not in registers
+  // like ARM64's x30). When we memcpy the stack to a new location, we must
+  // adjust these return addresses by the relocation offset.
   //
-  // REQUIRED FOR FULL x86-64 SUPPORT:
-  // 1. Walk the stack frame chain using rbp (frame pointer)
-  // 2. For each frame, adjust the return address by (new_stack_top -
-  // old_stack_top)
-  // 3. Handle cases where rbp chain is broken (optimized code, leaf functions)
+  // Stack frame layout on x86-64:
+  //   [rbp]     = previous frame pointer
+  //   [rbp + 8] = return address (pushed by call instruction)
   //
-  // CURRENT WORKAROUND: Checkpoint-based growth catches most cases BEFORE
-  // return addresses are on the stack. This works for simple strands but
-  // will fail for deep call stacks or recursive functions.
-  //
-  // TODO: Implement full stack frame walking and return address adjustment
-  // See Go runtime's adjustframe() for reference implementation.
+  // We walk the frame chain and adjust each return address that points
+  // into the old stack region.
+
+  // Calculate relocation offset
+  intptr_t stack_offset = (intptr_t)new_stack_top - (intptr_t)old_stack_top;
 
   // Update stack pointer
   strand->context.rsp = new_sp;
 
+  // Save old rbp before adjustment for frame walking
+  uintptr_t old_rbp = strand->context.rbp;
+
   // Update frame pointer (rbp) - but only if it points into the old stack
-  if (strand->context.rbp >= (uintptr_t)old_meta->usable_base &&
-      strand->context.rbp <= old_stack_top) {
-    uintptr_t offset_from_top = old_stack_top - strand->context.rbp;
-    strand->context.rbp = new_stack_top - offset_from_top;
+  uintptr_t new_rbp = old_rbp;
+  if (old_rbp >= (uintptr_t)old_meta->usable_base &&
+      old_rbp <= old_stack_top) {
+    uintptr_t offset_from_top = old_stack_top - old_rbp;
+    new_rbp = new_stack_top - offset_from_top;
+    strand->context.rbp = new_rbp;
   }
 
-  // WARNING: We are NOT adjusting return addresses on the stack!
-  // This will likely cause crashes if the strand has active call frames.
-  fprintf(stderr, "WARNING: x86-64 stack growth is INCOMPLETE and may crash\n");
-  fprintf(stderr, "  Return addresses on stack are not adjusted!\n");
+  // Walk the stack frame chain and adjust return addresses
+  // Start from the OLD rbp position (before adjustment)
+  uintptr_t frame_ptr = old_rbp;
+  int frames_adjusted = 0;
+
+  while (frame_ptr != 0) {
+    // Sanity check: frame pointer must be within the old stack
+    // (we're walking through the copied stack in the new location)
+    if (frame_ptr < (uintptr_t)old_meta->usable_base ||
+        frame_ptr > old_stack_top) {
+      break;
+    }
+
+    // Calculate where this frame is in the NEW stack
+    uintptr_t offset_from_top = old_stack_top - frame_ptr;
+    uintptr_t new_frame_ptr = new_stack_top - offset_from_top;
+
+    // The return address is at [new_frame_ptr + 8]
+    uintptr_t *return_addr_ptr = (uintptr_t *)(new_frame_ptr + 8);
+    uintptr_t return_addr = *return_addr_ptr;
+
+    // Check if return address points into the old stack
+    // If it does, adjust it by the relocation offset
+    if (return_addr >= (uintptr_t)old_meta->usable_base &&
+        return_addr <= old_stack_top) {
+      uintptr_t new_return_addr = return_addr + stack_offset;
+      *return_addr_ptr = new_return_addr;
+      frames_adjusted++;
+    }
+
+    // Follow the frame chain: next frame is at [new_frame_ptr]
+    uintptr_t *prev_frame_ptr = (uintptr_t *)new_frame_ptr;
+    uintptr_t prev_frame = *prev_frame_ptr;
+
+    // Stop if we've reached the end of the chain
+    if (prev_frame == 0 || prev_frame == frame_ptr) {
+      break;
+    }
+
+    frame_ptr = prev_frame;
+
+    // Safety: don't walk more than 1000 frames (prevent infinite loops)
+    if (frames_adjusted > 1000) {
+      if (in_signal_handler) {
+        signal_safe_write(
+            "WARNING: Stack frame chain too deep (>1000 frames)\n");
+      } else {
+        fprintf(stderr,
+                "WARNING: Stack frame chain too deep (>1000 frames), stopping "
+                "frame walk\n");
+      }
+      break;
+    }
+  }
+
+  // Log frame adjustment (helpful for debugging)
+  if (frames_adjusted > 0) {
+    if (in_signal_handler) {
+      signal_safe_write("INFO: Adjusted ");
+      char buf[32];
+      size_to_str((size_t)frames_adjusted, buf, sizeof(buf));
+      signal_safe_write(buf);
+      signal_safe_write(" return addresses\n");
+    } else {
+      fprintf(stderr, "INFO: Adjusted %d return addresses during stack growth\n",
+              frames_adjusted);
+    }
+  }
 
 #else
 #error "Unsupported architecture for dynamic stack growth"
