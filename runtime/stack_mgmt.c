@@ -518,15 +518,22 @@ bool stack_grow(struct Strand *strand, size_t new_usable_size,
 
     // Follow the frame chain: read saved frame pointer at [rbp]
     uintptr_t *prev_frame_ptr = (uintptr_t *)new_frame_ptr;
-    uintptr_t prev_frame = *prev_frame_ptr;
+    uintptr_t prev_frame_old = *prev_frame_ptr;
 
-    // Validate frame chain is moving upward (toward higher addresses)
-    // On x86-64, stacks grow downward, so frame pointers should increase
-    // as we walk toward the bottom of the stack
-    if (prev_frame != 0) {
-      // Translate back to old stack coordinates for comparison
-      uintptr_t prev_frame_old = prev_frame - stack_offset;
+    // The saved frame pointer still points to the OLD stack (from memcpy).
+    // We need to adjust it to point to the NEW stack.
+    if (prev_frame_old != 0) {
+      // Check if the saved frame pointer points into the old stack
+      if (prev_frame_old >= (uintptr_t)old_meta->usable_base &&
+          prev_frame_old <= old_stack_top) {
+        // Adjust the saved frame pointer to point to the new stack
+        uintptr_t prev_frame_new = prev_frame_old + stack_offset;
+        *prev_frame_ptr = prev_frame_new;
+      }
 
+      // Validate frame chain is moving upward (toward higher addresses)
+      // On x86-64, stacks grow downward, so frame pointers should increase
+      // as we walk toward the bottom of the stack
       if (prev_frame_old <= frame_ptr) {
         // Frame pointer not increasing - corrupted chain or cycle
         if (!in_signal_handler) {
@@ -548,9 +555,9 @@ bool stack_grow(struct Strand *strand, size_t new_usable_size,
   }
 
   if (frame_count >= MAX_FRAMES && !in_signal_handler) {
-    fprintf(stderr,
-            "WARNING: x86-64 stack walk hit frame limit (%d frames)\n",
-            MAX_FRAMES);
+    fprintf(
+        stderr, "WARNING: x86-64 stack walk hit frame limit (%d frames)\n",
+        MAX_FRAMES);
   }
 
 #else
