@@ -122,10 +122,14 @@ StackCell *dup(StackCell *stack) {
     new_cell->value.b = stack->value.b;
     break;
   case TAG_STRING:
-    new_cell->value.s = strdup(stack->value.s);
-    if (!new_cell->value.s) {
-      free_cell(new_cell);
-      runtime_error("dup: out of memory");
+    if (stack->value.s) {
+      new_cell->value.s = strdup(stack->value.s);
+      if (!new_cell->value.s) {
+        free_cell(new_cell);
+        runtime_error("dup: out of memory");
+      }
+    } else {
+      new_cell->value.s = NULL;
     }
     break;
   case TAG_QUOTATION:
@@ -185,10 +189,14 @@ StackCell *over(StackCell *stack) {
     new_cell->value.b = second->value.b;
     break;
   case TAG_STRING:
-    new_cell->value.s = strdup(second->value.s);
-    if (!new_cell->value.s) {
-      free_cell(new_cell);
-      runtime_error("over: out of memory");
+    if (second->value.s) {
+      new_cell->value.s = strdup(second->value.s);
+      if (!new_cell->value.s) {
+        free_cell(new_cell);
+        runtime_error("over: out of memory");
+      }
+    } else {
+      new_cell->value.s = NULL;
     }
     break;
   case TAG_QUOTATION:
@@ -268,6 +276,8 @@ StackCell *tuck(StackCell *stack) {
         free_cell(copy);
         runtime_error("tuck: out of memory");
       }
+    } else {
+      copy->value.s = NULL;
     }
     break;
   case TAG_QUOTATION:
