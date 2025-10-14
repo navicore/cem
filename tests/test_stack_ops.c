@@ -89,10 +89,12 @@ void test_rot() {
     printf("Testing rot...\n");
 
     // Test: 1 2 3 rot -> 2 3 1
-    // (A B C -> B C A where A=1, B=2, C=3)
+    // Standard Forth: ( a b c -- b c a )
+    // Bottom to top: 1 2 3 becomes 2 3 1
+    // Top down: 1 is now on top
     StackCell* stack = make_stack_3(1, 2, 3);
     stack = rot(stack);
-    assert_stack_ints(stack, 3, 1, 3, 2);  // top to bottom: 1 3 2
+    assert_stack_ints(stack, 3, 1, 2, 3);  // top to bottom: 1 2 3
     free_stack(stack);
 
     printf("  ✓ rot works\n");

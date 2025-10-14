@@ -217,6 +217,7 @@ StackCell *rot(StackCell *stack) {
     runtime_error("rot: stack underflow");
   }
 
+  // Standard Forth rot: ( a b c -- b c a )
   // Stack notation: bottom ... top
   // Before: ... A B C  (C on top)
   // After:  ... B C A  (A on top)
@@ -225,10 +226,11 @@ StackCell *rot(StackCell *stack) {
   StackCell *third = second->next; // A (third element)
   StackCell *rest = third->next;
 
-  // Relink: A -> C -> B -> rest
-  third->next = first;
-  first->next = second;
-  second->next = rest;
+  // Relink: A -> B -> C -> rest
+  // Result: B C A (A moves to top)
+  second->next = first;
+  first->next = rest;
+  third->next = second;
 
   return third; // A is now on top
 }
