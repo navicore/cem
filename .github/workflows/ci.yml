@@ -90,15 +90,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y clang llvm just
-      
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-      
+
       - name: Cache Cargo dependencies
         uses: actions/cache@v4
         with:
@@ -110,21 +110,21 @@ jobs:
             target/
           key: linux-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: linux-cargo-
-      
+
       - name: Build runtime library
         run: just build-runtime
-      
+
       - name: Verify epoll symbols
         run: |
           nm runtime/libcem_runtime.a | grep epoll
           echo "✓ epoll symbols found"
-      
-      - name: Run tests
+
+      - name: Run Rust tests
         run: just test-verbose
-      
-      - name: Run C context switching tests
-        run: just test-context
-      
+
+      - name: Run all runtime C tests
+        run: just test-all-runtime
+
       - name: Check build artifacts
         run: |
           ls -lh runtime/libcem_runtime.a
@@ -136,14 +136,14 @@ jobs:
     runs-on: macos-latest  # This is Apple Silicon (M1)
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Install dependencies
         run: |
           brew install llvm just
-      
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-      
+
       - name: Cache Cargo dependencies
         uses: actions/cache@v4
         with:
@@ -155,21 +155,21 @@ jobs:
             target/
           key: macos-arm-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: macos-arm-cargo-
-      
+
       - name: Build runtime library
         run: just build-runtime
-      
+
       - name: Verify kqueue symbols
         run: |
           nm runtime/libcem_runtime.a | grep kqueue || echo "kqueue is system call"
           echo "✓ Runtime built for macOS"
-      
-      - name: Run tests
+
+      - name: Run Rust tests
         run: just test-verbose
-      
-      - name: Run C context switching tests
-        run: just test-context
-      
+
+      - name: Run all runtime C tests
+        run: just test-all-runtime
+
       - name: Check build artifacts
         run: |
           ls -lh runtime/libcem_runtime.a

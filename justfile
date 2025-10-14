@@ -229,8 +229,15 @@ test-stack-growth: build-runtime
     ./tests/test_stack_growth
     @echo "✅ Stack growth stress tests passed"
 
+# Test stack manipulation operations
+test-stack-ops: build-runtime
+    @echo "Building stack operation tests..."
+    clang -Wall -Wextra -std=c11 -g tests/test_stack_ops.c -Lruntime -lcem_runtime -o tests/test_stack_ops
+    ./tests/test_stack_ops
+    @echo "✅ Stack operation tests passed"
+
 # Run all runtime tests (Phase 3)
-test-all-runtime: test-runtime test-scheduler test-context test-cleanup test-io-cleanup test-stack-growth
+test-all-runtime: test-runtime test-scheduler test-context test-cleanup test-io-cleanup test-stack-growth test-stack-ops
     @echo ""
     @echo "🎉 All runtime tests passed!"
 

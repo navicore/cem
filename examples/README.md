@@ -53,13 +53,16 @@ Computes 6 * 7 = 42. Once int-to-string conversion is added to the runtime, this
 These examples currently demonstrate:
 - ✅ Async I/O with green threads (`read_line`, `write_line`)
 - ✅ String literals and operations
-- ✅ Basic arithmetic
+- ✅ Basic arithmetic (`+`, `-`, `multiply`)
+- ✅ Stack manipulation (`dup`, `drop`, `swap`, `over`, `rot`, `nip`, `tuck`)
 - ✅ Tail-call optimization
 
 Coming soon:
-- Stack manipulation words (dup, over, swap, nip, etc.)
-- Comparison operators
+- Comparison operators (`<`, `>`, `<=`, `>=`, `==`, `!=`)
+- Conditional execution (`if`/`then`/`else`)
+- Boolean type and logical operators
 - Integer to string conversion
+- Loops and iteration
 - Concurrent multi-strand programs
 
 ## Language Features Demonstrated

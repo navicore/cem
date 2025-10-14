@@ -209,17 +209,82 @@ StackCell *rot(StackCell *stack) {
     runtime_error("rot: stack underflow");
   }
 
-  StackCell *first = stack;
-  StackCell *second = stack->next;
-  StackCell *third = second->next;
+  StackCell *first = stack;        // C (top)
+  StackCell *second = stack->next; // B
+  StackCell *third = second->next; // A (third from top)
   StackCell *rest = third->next;
 
   // Rotate: A B C -> B C A
-  second->next = third;
+  // third (A) becomes top, then first (C), then second (B)
   third->next = first;
-  first->next = rest;
+  first->next = second;
+  second->next = rest;
 
-  return second;
+  return third;
+}
+
+StackCell *nip(StackCell *stack) {
+  if (!stack || !stack->next) {
+    runtime_error("nip: stack underflow");
+  }
+
+  // Remove second element: A B -> B
+  StackCell *first = stack;
+  StackCell *second = stack->next;
+  StackCell *rest = second->next;
+
+  first->next = rest;
+  free_cell(second);
+
+  return first;
+}
+
+StackCell *tuck(StackCell *stack) {
+  if (!stack || !stack->next) {
+    runtime_error("tuck: stack underflow");
+  }
+
+  // Copy top below second: A B -> B A B
+  StackCell *first = stack;        // B
+  StackCell *second = stack->next; // A
+  StackCell *rest = second->next;
+
+  // Create copy of first (B)
+  StackCell *copy = alloc_cell();
+  copy->tag = first->tag;
+
+  // Deep copy the value
+  switch (first->tag) {
+  case TAG_INT:
+    copy->value.i = first->value.i;
+    break;
+  case TAG_BOOL:
+    copy->value.b = first->value.b;
+    break;
+  case TAG_STRING:
+    if (first->value.s) {
+      copy->value.s = strdup(first->value.s);
+      if (!copy->value.s) {
+        free_cell(copy);
+        runtime_error("tuck: out of memory");
+      }
+    }
+    break;
+  case TAG_QUOTATION:
+    copy->value.quotation = first->value.quotation;
+    break;
+  case TAG_VARIANT:
+    free_cell(copy);
+    runtime_error("tuck: variant copying not yet implemented");
+    break;
+  }
+
+  // Link: B -> A -> B(copy) -> rest
+  copy->next = rest;
+  second->next = copy;
+  first->next = second;
+
+  return first;
 }
 
 // ============================================================================

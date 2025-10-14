@@ -106,6 +106,18 @@ StackCell *over(StackCell *stack);
  */
 StackCell *rot(StackCell *stack);
 
+/**
+ * nip ( A B -- B )
+ * Remove the second element
+ */
+StackCell *nip(StackCell *stack);
+
+/**
+ * tuck ( A B -- B A B )
+ * Copy top element below second
+ */
+StackCell *tuck(StackCell *stack);
+
 // ============================================================================
 // Arithmetic Operations
 // ============================================================================

@@ -128,6 +128,31 @@ impl Environment {
             },
         );
 
+        // nip: ( A B -- B )
+        self.add_word(
+            "nip".to_string(),
+            Effect {
+                inputs: StackType::empty()
+                    .push(Type::Var("A".to_string()))
+                    .push(Type::Var("B".to_string())),
+                outputs: StackType::empty().push(Type::Var("B".to_string())),
+            },
+        );
+
+        // tuck: ( A B -- B A B )
+        self.add_word(
+            "tuck".to_string(),
+            Effect {
+                inputs: StackType::empty()
+                    .push(Type::Var("A".to_string()))
+                    .push(Type::Var("B".to_string())),
+                outputs: StackType::empty()
+                    .push(Type::Var("B".to_string()))
+                    .push(Type::Var("A".to_string()))
+                    .push(Type::Var("B".to_string())),
+            },
+        );
+
         // Arithmetic operations
         // +: ( Int Int -- Int )
         self.add_word(
