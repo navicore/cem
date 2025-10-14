@@ -457,9 +457,20 @@ bool stack_grow(struct Strand *strand, size_t new_usable_size,
   // Walk the frame chain and adjust return addresses
   // Note: We walk the OLD stack (before freeing) to find all return addresses,
   // then adjust them in the NEW stack.
+  //
+  // Special case: If rbp is at or very close to stack_top, there's likely no
+  // frame chain established yet (strand just started, makecontext set rbp=stack_top).
+  // In this case, skip frame walking entirely.
   uintptr_t frame_ptr = old_rbp;
   int frame_count = 0;
   const int MAX_FRAMES = 1000; // Safety limit
+
+  // Check if we have room for at least one frame (need space for [rbp] and [rbp+8])
+  // If rbp + 8 >= stack_top, we're at the very top with no established frames
+  if (frame_ptr + 8 >= old_stack_top) {
+    // No frame chain yet - skip walking
+    frame_ptr = 0;
+  }
 
   while (frame_ptr != 0 && frame_count < MAX_FRAMES) {
     // Validate frame pointer is within old stack bounds
@@ -541,6 +552,12 @@ bool stack_grow(struct Strand *strand, size_t new_usable_size,
     // else: return address points to code segment - no adjustment needed
 
     // Follow the frame chain: read saved frame pointer at [rbp]
+    // First, ensure we have room to read [rbp] itself (not just [rbp+8])
+    // If rbp is at or past (stack_top - 8), we can't safely read [rbp]
+    if (new_frame_ptr + sizeof(uintptr_t) > new_stack_top) {
+      // Can't read saved frame pointer - at edge of stack
+      break;
+    }
     uintptr_t *prev_frame_ptr = (uintptr_t *)new_frame_ptr;
     uintptr_t prev_frame_old = *prev_frame_ptr;
 
@@ -586,9 +603,9 @@ bool stack_grow(struct Strand *strand, size_t new_usable_size,
   }
 
   if (frame_count >= MAX_FRAMES && !in_signal_handler) {
-    fprintf(
-        stderr, "WARNING: x86-64 stack walk hit frame limit (%d frames)\n",
-        MAX_FRAMES);
+    fprintf(stderr,
+            "WARNING: x86-64 stack walk hit frame limit (%d frames)\n",
+            MAX_FRAMES);
   }
 
 #else
