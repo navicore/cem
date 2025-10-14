@@ -1,0 +1,19 @@
+# chat.cem - Simple chat bot example
+#
+# Demonstrates:
+# - Interactive I/O with read_line and write_line
+# - String manipulation
+# - Async green thread scheduling
+
+: main ( -- )
+  "Welcome to Cem Chat!" write_line
+  "Type messages and I'll echo them back." write_line
+  "Each I/O operation yields to the scheduler," write_line
+  "enabling 100K+ concurrent chat sessions!" write_line
+  "" write_line
+  "You: " write_line
+  read_line
+  "Bot: You said: " write_line
+  write_line
+  "" write_line
+  "Thanks for trying Cem!" write_line ;

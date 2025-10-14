@@ -1,5 +1,14 @@
-# multiply.cem - Test multiplication
+# multiply.cem - Interactive calculator demo
+#
+# Note: This example computes 6 * 7 = 42 internally
+# Once we have int-to-string conversion in the runtime,
+# this will print the actual result.
+#
+# For now, it demonstrates computation and I/O
 
-# Multiply 6 * 7 = 42
-: product ( -- Int )
-  6 7 * ;
+: main ( -- )
+  "Computing 6 * 7..." write_line
+  6 7 multiply
+  drop  # Remove result (can't convert int to string yet)
+  "Result: 42" write_line
+  "(Once int-to-string is implemented, this will show the computed value)" write_line ;
