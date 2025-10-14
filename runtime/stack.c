@@ -217,18 +217,20 @@ StackCell *rot(StackCell *stack) {
     runtime_error("rot: stack underflow");
   }
 
-  StackCell *first = stack;        // C (top)
-  StackCell *second = stack->next; // B
-  StackCell *third = second->next; // A (third from top)
+  // Stack notation: bottom ... top
+  // Before: ... A B C  (C on top)
+  // After:  ... B C A  (A on top)
+  StackCell *first = stack;        // C (top element)
+  StackCell *second = stack->next; // B (second element)
+  StackCell *third = second->next; // A (third element)
   StackCell *rest = third->next;
 
-  // Rotate: A B C -> B C A
-  // third (A) becomes top, then first (C), then second (B)
+  // Relink: A -> C -> B -> rest
   third->next = first;
   first->next = second;
   second->next = rest;
 
-  return third;
+  return third; // A is now on top
 }
 
 StackCell *nip(StackCell *stack) {
