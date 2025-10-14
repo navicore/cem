@@ -73,9 +73,20 @@ void test_basic_allocation(void) {
 static bool checkpoint_growth_triggered = false;
 
 StackCell* strand_force_checkpoint_growth(StackCell* stack) {
+    fprintf(stderr, "  [DEBUG] Strand started\n");
+    fflush(stderr);
+
     // Simulate high stack usage by allocating large local buffer
+    fprintf(stderr, "  [DEBUG] About to allocate 6KB buffer\n");
+    fflush(stderr);
     char buffer[6 * 1024];  // 6KB - should trigger growth from 4KB
+
+    fprintf(stderr, "  [DEBUG] Buffer allocated, about to memset\n");
+    fflush(stderr);
     memset(buffer, 0xAA, sizeof(buffer));  // Prevent optimization
+
+    fprintf(stderr, "  [DEBUG] memset done\n");
+    fflush(stderr);
 
     // If we get here without crashing, checkpoint growth worked
     checkpoint_growth_triggered = true;
@@ -83,6 +94,8 @@ StackCell* strand_force_checkpoint_growth(StackCell* stack) {
     // Use the buffer to prevent compiler from optimizing it away
     buffer[0] = 1;
 
+    fprintf(stderr, "  [DEBUG] Strand completing\n");
+    fflush(stderr);
     return stack;
 }
 
