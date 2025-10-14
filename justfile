@@ -100,7 +100,7 @@ fix-fmt: fmt fmt-c
     @echo "✅ All code formatted!"
 
 # Clean build artifacts
-clean:
+clean: clean-runtime
     cargo clean
     rm -f *.o *.ll *_exe echo hello_io test_call test_dbg test_nested_if_debug
     @echo "✅ Cleaned build artifacts"
@@ -197,8 +197,8 @@ test-runtime: build-runtime
 # Test scheduler infrastructure
 test-scheduler: build-runtime
     @echo "Building scheduler tests..."
-    cd runtime && clang -Wall -Wextra -std=c11 -g test_scheduler.c -L. -lcem_runtime -o test_scheduler
-    cd runtime && ./test_scheduler
+    clang -Wall -Wextra -std=c11 -g tests/test_scheduler.c -Lruntime -lcem_runtime -o tests/test_scheduler
+    ./tests/test_scheduler
     @echo "✅ Scheduler tests passed"
 
 # Test context switching implementation
@@ -243,6 +243,7 @@ test-all-runtime: test-runtime test-scheduler test-context test-cleanup test-io-
 
 # Clean runtime build artifacts
 clean-runtime:
-    rm -f runtime/*.o runtime/*.a runtime/test_runtime runtime/test_scheduler
-    rm -f tests/test_context tests/test_cleanup tests/test_io_cleanup
+    rm -f runtime/*.o runtime/*.a runtime/test_runtime
+    rm -f tests/test_scheduler tests/test_context tests/test_cleanup tests/test_io_cleanup tests/test_stack_growth tests/test_stack_ops
+    rm -rf tests/*.dSYM
     @echo "Cleaned runtime artifacts"
