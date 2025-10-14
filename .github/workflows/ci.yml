@@ -119,8 +119,8 @@ jobs:
           nm runtime/libcem_runtime.a | grep epoll
           echo "✓ epoll symbols found"
       
-      - name: Run Rust tests
-        run: cargo test --verbose
+      - name: Run tests
+        run: just test-verbose
       
       - name: Run C context switching tests
         run: just test-context
@@ -164,8 +164,8 @@ jobs:
           nm runtime/libcem_runtime.a | grep kqueue || echo "kqueue is system call"
           echo "✓ Runtime built for macOS"
       
-      - name: Run Rust tests
-        run: cargo test --verbose
+      - name: Run tests
+        run: just test-verbose
       
       - name: Run C context switching tests
         run: just test-context
