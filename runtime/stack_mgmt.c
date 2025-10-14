@@ -489,42 +489,32 @@ bool stack_grow(struct Strand *strand, size_t new_usable_size,
     uintptr_t *return_addr_ptr = (uintptr_t *)(new_frame_ptr + 8);
     uintptr_t return_addr = *return_addr_ptr;
 
-    // Adjust return address
-    // Note: Return addresses point to CODE, not stack data. We adjust ALL
-    // return addresses unconditionally by the stack offset, since the return
-    // address itself may have been used as a data pointer stored on the stack.
-    // However, we add sanity checks to catch obvious corruption.
+    // Adjust return address ONLY if it points into the old stack
+    // Note: Return addresses typically point to CODE in the text segment,
+    // which doesn't move during stack relocation. We MUST NOT adjust these.
     //
-    // In a typical scenario, return addresses point to the text segment and
-    // don't need adjustment. But in JIT scenarios or with nested functions,
-    // they might point to stack-allocated trampolines. We adjust all of them
-    // to be safe.
-    uintptr_t new_return_addr = return_addr + stack_offset;
+    // However, in rare cases (nested functions with trampolines, JIT code),
+    // a return address might point to code generated on the stack. In those
+    // cases, we need to adjust it to point to the new stack location.
+    //
+    // Strategy: Check if return address is within old stack bounds.
+    // - If YES: It's a trampoline - adjust it to new stack location
+    // - If NO: It's normal code - leave it unchanged (already copied by memcpy)
+    if (return_addr >= (uintptr_t)old_meta->usable_base &&
+        return_addr <= old_stack_top) {
+      // Return address points into old stack (trampoline case) - adjust it
+      uintptr_t new_return_addr = return_addr + stack_offset;
+      *return_addr_ptr = new_return_addr;
 
-    // Sanity check: The original return address should NOT have been pointing
-    // into the old stack (that would be very unusual and indicate corruption)
-    // But if it was, we've now adjusted it to point into the new stack.
-    // Post-adjustment, the new return address should NOT point into new stack
-    // (return addresses should point to code, not data)
-    if (new_return_addr >= (uintptr_t)new_meta->usable_base &&
-        new_return_addr <= new_stack_top) {
-      // This is suspicious - return address points into stack after adjustment
-      // Either:
-      // 1. This is a JIT/trampoline scenario (intended)
-      // 2. The original return address was corrupted
-      // 3. Our offset calculation is wrong
-      //
-      // For safety, we'll keep the adjusted value but log a warning
+      // Log this unusual case
       if (!in_signal_handler) {
         fprintf(stderr,
-                "WARNING: x86-64 stack walk found return address %p -> %p "
-                "pointing into stack (frame %d)\n",
+                "INFO: x86-64 stack walk adjusted trampoline return address "
+                "%p -> %p (frame %d)\n",
                 (void *)return_addr, (void *)new_return_addr, frame_count);
       }
     }
-
-    // Write adjusted return address back to new stack
-    *return_addr_ptr = new_return_addr;
+    // else: return address points to code segment - no adjustment needed
 
     // Follow the frame chain: read saved frame pointer at [rbp]
     uintptr_t *prev_frame_ptr = (uintptr_t *)new_frame_ptr;
