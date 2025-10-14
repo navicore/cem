@@ -522,6 +522,7 @@ bool stack_grow(struct Strand *strand, size_t new_usable_size,
 
     // The saved frame pointer still points to the OLD stack (from memcpy).
     // We need to adjust it to point to the NEW stack.
+    uintptr_t next_frame_ptr;  // The frame pointer to use for next iteration
     if (prev_frame_old != 0) {
       // Check if the saved frame pointer points into the old stack
       if (prev_frame_old >= (uintptr_t)old_meta->usable_base &&
@@ -529,6 +530,12 @@ bool stack_grow(struct Strand *strand, size_t new_usable_size,
         // Adjust the saved frame pointer to point to the new stack
         uintptr_t prev_frame_new = prev_frame_old + stack_offset;
         *prev_frame_ptr = prev_frame_new;
+        // Continue walking using the old address for next iteration
+        // (we walk the old stack's chain, adjusting as we go)
+        next_frame_ptr = prev_frame_old;
+      } else {
+        // Frame pointer points outside old stack - leave unchanged
+        next_frame_ptr = prev_frame_old;
       }
 
       // Validate frame chain is moving upward (toward higher addresses)
@@ -545,7 +552,7 @@ bool stack_grow(struct Strand *strand, size_t new_usable_size,
         break;
       }
 
-      frame_ptr = prev_frame_old;
+      frame_ptr = next_frame_ptr;
     } else {
       // Reached the bottom of the stack
       break;
@@ -555,9 +562,9 @@ bool stack_grow(struct Strand *strand, size_t new_usable_size,
   }
 
   if (frame_count >= MAX_FRAMES && !in_signal_handler) {
-    fprintf(
-        stderr, "WARNING: x86-64 stack walk hit frame limit (%d frames)\n",
-        MAX_FRAMES);
+    fprintf(stderr,
+            "WARNING: x86-64 stack walk hit frame limit (%d frames)\n",
+            MAX_FRAMES);
   }
 
 #else
