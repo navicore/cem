@@ -22,6 +22,10 @@ release:
 test: build-runtime
     cargo test
 
+# Run all tests with verbose output (for CI)
+test-verbose: build-runtime
+    cargo test --verbose
+
 # Run only library tests
 test-lib:
     cargo test --lib
