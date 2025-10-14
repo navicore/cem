@@ -122,10 +122,14 @@ StackCell *dup(StackCell *stack) {
     new_cell->value.b = stack->value.b;
     break;
   case TAG_STRING:
-    new_cell->value.s = strdup(stack->value.s);
-    if (!new_cell->value.s) {
-      free_cell(new_cell);
-      runtime_error("dup: out of memory");
+    if (stack->value.s) {
+      new_cell->value.s = strdup(stack->value.s);
+      if (!new_cell->value.s) {
+        free_cell(new_cell);
+        runtime_error("dup: out of memory");
+      }
+    } else {
+      new_cell->value.s = NULL;
     }
     break;
   case TAG_QUOTATION:
@@ -185,10 +189,14 @@ StackCell *over(StackCell *stack) {
     new_cell->value.b = second->value.b;
     break;
   case TAG_STRING:
-    new_cell->value.s = strdup(second->value.s);
-    if (!new_cell->value.s) {
-      free_cell(new_cell);
-      runtime_error("over: out of memory");
+    if (second->value.s) {
+      new_cell->value.s = strdup(second->value.s);
+      if (!new_cell->value.s) {
+        free_cell(new_cell);
+        runtime_error("over: out of memory");
+      }
+    } else {
+      new_cell->value.s = NULL;
     }
     break;
   case TAG_QUOTATION:
@@ -209,17 +217,88 @@ StackCell *rot(StackCell *stack) {
     runtime_error("rot: stack underflow");
   }
 
-  StackCell *first = stack;
-  StackCell *second = stack->next;
-  StackCell *third = second->next;
+  // Standard Forth rot: ( a b c -- b c a )
+  // Stack notation: bottom ... top
+  // Before: ... A B C  (C on top)
+  // After:  ... B C A  (A on top)
+  StackCell *first = stack;        // C (top element)
+  StackCell *second = stack->next; // B (second element)
+  StackCell *third = second->next; // A (third element)
   StackCell *rest = third->next;
 
-  // Rotate: A B C -> B C A
-  second->next = third;
-  third->next = first;
+  // Relink: A -> B -> C -> rest
+  // Result: B C A (A moves to top)
+  second->next = first;
   first->next = rest;
+  third->next = second;
 
-  return second;
+  return third; // A is now on top
+}
+
+StackCell *nip(StackCell *stack) {
+  if (!stack || !stack->next) {
+    runtime_error("nip: stack underflow");
+  }
+
+  // Remove second element: A B -> B
+  StackCell *first = stack;
+  StackCell *second = stack->next;
+  StackCell *rest = second->next;
+
+  first->next = rest;
+  free_cell(second);
+
+  return first;
+}
+
+StackCell *tuck(StackCell *stack) {
+  if (!stack || !stack->next) {
+    runtime_error("tuck: stack underflow");
+  }
+
+  // Copy top below second: A B -> B A B
+  StackCell *first = stack;        // B
+  StackCell *second = stack->next; // A
+  StackCell *rest = second->next;
+
+  // Create copy of first (B)
+  StackCell *copy = alloc_cell();
+  copy->tag = first->tag;
+
+  // Deep copy the value
+  switch (first->tag) {
+  case TAG_INT:
+    copy->value.i = first->value.i;
+    break;
+  case TAG_BOOL:
+    copy->value.b = first->value.b;
+    break;
+  case TAG_STRING:
+    if (first->value.s) {
+      copy->value.s = strdup(first->value.s);
+      if (!copy->value.s) {
+        free_cell(copy);
+        runtime_error("tuck: out of memory");
+      }
+    } else {
+      copy->value.s = NULL;
+    }
+    break;
+  case TAG_QUOTATION:
+    copy->value.quotation = first->value.quotation;
+    break;
+  case TAG_VARIANT:
+    free_cell(copy);
+    runtime_error("tuck: variant copying not yet implemented");
+    break;
+  }
+
+  // Link: B -> A -> B(copy) -> rest
+  copy->next = rest;
+  second->next = copy;
+  first->next = second;
+
+  return first;
 }
 
 // ============================================================================

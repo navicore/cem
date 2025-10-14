@@ -100,7 +100,7 @@ fix-fmt: fmt fmt-c
     @echo "✅ All code formatted!"
 
 # Clean build artifacts
-clean:
+clean: clean-runtime
     cargo clean
     rm -f *.o *.ll *_exe echo hello_io test_call test_dbg test_nested_if_debug
     @echo "✅ Cleaned build artifacts"
@@ -197,8 +197,8 @@ test-runtime: build-runtime
 # Test scheduler infrastructure
 test-scheduler: build-runtime
     @echo "Building scheduler tests..."
-    cd runtime && clang -Wall -Wextra -std=c11 -g test_scheduler.c -L. -lcem_runtime -o test_scheduler
-    cd runtime && ./test_scheduler
+    clang -Wall -Wextra -std=c11 -g tests/test_scheduler.c -Lruntime -lcem_runtime -o tests/test_scheduler
+    ./tests/test_scheduler
     @echo "✅ Scheduler tests passed"
 
 # Test context switching implementation
@@ -229,13 +229,21 @@ test-stack-growth: build-runtime
     ./tests/test_stack_growth
     @echo "✅ Stack growth stress tests passed"
 
+# Test stack manipulation operations
+test-stack-ops: build-runtime
+    @echo "Building stack operation tests..."
+    clang -Wall -Wextra -std=c11 -g tests/test_stack_ops.c -Lruntime -lcem_runtime -o tests/test_stack_ops
+    ./tests/test_stack_ops
+    @echo "✅ Stack operation tests passed"
+
 # Run all runtime tests (Phase 3)
-test-all-runtime: test-runtime test-scheduler test-context test-cleanup test-io-cleanup test-stack-growth
+test-all-runtime: test-runtime test-scheduler test-context test-cleanup test-io-cleanup test-stack-growth test-stack-ops
     @echo ""
     @echo "🎉 All runtime tests passed!"
 
 # Clean runtime build artifacts
 clean-runtime:
-    rm -f runtime/*.o runtime/*.a runtime/test_runtime runtime/test_scheduler
-    rm -f tests/test_context tests/test_cleanup tests/test_io_cleanup
+    rm -f runtime/*.o runtime/*.a runtime/test_runtime
+    rm -f tests/test_scheduler tests/test_context tests/test_cleanup tests/test_io_cleanup tests/test_stack_growth tests/test_stack_ops
+    rm -rf tests/*.dSYM
     @echo "Cleaned runtime artifacts"

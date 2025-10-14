@@ -181,7 +181,7 @@ impl CodeGen {
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
         // Stack operations (ptr -> ptr)
-        for func in &["dup", "drop", "swap", "over", "rot"] {
+        for func in &["dup", "drop", "swap", "over", "rot", "nip", "tuck"] {
             writeln!(&mut self.output, "declare ptr @{}(ptr)", func)
                 .map_err(|e| CodegenError::InternalError(e.to_string()))?;
         }
