@@ -9,9 +9,10 @@
  * not to test actual blocking I/O (which is hard to test in unit tests).
  */
 
+#define _POSIX_C_SOURCE 200809L
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <assert.h>
 #include <string.h>
 #include <stdbool.h>
 #include "../runtime/scheduler.h"
