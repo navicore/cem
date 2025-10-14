@@ -117,3 +117,7 @@ cem_swapcontext:
  *      b) The strand's stack memory remains valid (heap-allocated)
  *      c) Scheduler uses proper synchronization for queue operations
  */
+
+// Mark stack as non-executable (required for modern Linux security)
+// This prevents "missing .note.GNU-stack section implies executable stack" warnings
+.section .note.GNU-stack,"",@progbits
