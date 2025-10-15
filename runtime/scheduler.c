@@ -276,6 +276,10 @@ void scheduler_shutdown(void) {
 // Strand Spawning
 // ============================================================================
 
+// Debug: minimal trampoline to isolate the crash
+static volatile int debug_step = 0;
+static volatile void *debug_strand_ptr = NULL;
+
 /**
  * Trampoline function for strand entry
  *
@@ -284,20 +288,19 @@ void scheduler_shutdown(void) {
  * structure instead.
  */
 static void strand_entry_trampoline(void) {
-  fprintf(stderr, "[TRAMPOLINE] Entered trampoline!\n");
-  fflush(stderr);
+  debug_step = 1; // We entered
 
   // Get the current strand (set by scheduler before swapping to us)
   Strand *strand = global_scheduler.current_strand;
-  fprintf(stderr, "[TRAMPOLINE] current_strand = %p\n", (void *)strand);
-  fflush(stderr);
+  debug_step = 2; // We read current_strand
+  debug_strand_ptr = strand;
 
   if (!strand) {
+    debug_step = 99; // NULL strand
     runtime_error("strand_entry_trampoline: no current strand");
   }
 
-  fprintf(stderr, "[TRAMPOLINE] About to call entry_func\n");
-  fflush(stderr);
+  debug_step = 3; // Strand is valid
 
   // Get the entry function and initial stack from the strand
   StackCell *(*entry_func)(StackCell *) = strand->entry_func;
@@ -676,7 +679,8 @@ StackCell *scheduler_run(void) {
       // When strand yields or completes, we'll return here
       cem_swapcontext(&global_scheduler.scheduler_context, &strand->context);
 
-      fprintf(stderr, "[SCHED] Returned from swapcontext\n");
+      fprintf(stderr, "[SCHED] Returned from swapcontext, debug_step=%d\n",
+              debug_step);
       fflush(stderr);
 
       // We're back from the strand
