@@ -56,10 +56,11 @@ cem_swapcontext:
     // Note: We save the SP *after* this function was called
     // (i.e., pointing to the return address on the stack)
     mov     %rsp, 0x30(%rdi)
-    
+
     // Save MXCSR (floating point control/status)
-    stmxcsr 0x38(%rdi)
-    
+    // NOTE: Temporarily disabled for debugging
+    // stmxcsr 0x38(%rdi)
+
     // Restore context from restore_ctx (rsi)
     
     // Restore callee-saved registers
@@ -72,10 +73,11 @@ cem_swapcontext:
     
     // Restore stack pointer
     mov     0x30(%rsi), %rsp
-    
+
     // Restore MXCSR
-    ldmxcsr 0x38(%rsi)
-    
+    // NOTE: Temporarily disabled for debugging
+    // ldmxcsr 0x38(%rsi)
+
     // Return to the address on the stack
     // The return address was pushed by the caller when calling us,
     // and we just restored rsp to point to that address
