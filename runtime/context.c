@@ -89,8 +89,10 @@ void cem_makecontext(cem_context_t *ctx, void *stack_base, size_t stack_size,
 
   ctx->rsp = stack_top;
 
-  // Set frame pointer to stack top (no frame yet)
-  ctx->rbp = stack_top;
+  // Set frame pointer to 0 (no parent frame)
+  // Setting it to stack_top would mean the return address is part of the frame,
+  // which is wrong and causes stack corruption when the function uses rbp
+  ctx->rbp = 0;
 
   // Initialize MXCSR to default value (0x1F80)
   // This enables all floating point exceptions masked
