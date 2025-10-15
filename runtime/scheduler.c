@@ -289,7 +289,7 @@ static void strand_entry_trampoline(void) {
 
   // Get the current strand (set by scheduler before swapping to us)
   Strand *strand = global_scheduler.current_strand;
-  fprintf(stderr, "[TRAMPOLINE] current_strand = %p\n", (void*)strand);
+  fprintf(stderr, "[TRAMPOLINE] current_strand = %p\n", (void *)strand);
   fflush(stderr);
 
   if (!strand) {
