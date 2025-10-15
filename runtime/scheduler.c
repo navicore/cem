@@ -284,11 +284,20 @@ void scheduler_shutdown(void) {
  * structure instead.
  */
 static void strand_entry_trampoline(void) {
+  fprintf(stderr, "[TRAMPOLINE] Entered trampoline!\n");
+  fflush(stderr);
+
   // Get the current strand (set by scheduler before swapping to us)
   Strand *strand = global_scheduler.current_strand;
+  fprintf(stderr, "[TRAMPOLINE] current_strand = %p\n", (void*)strand);
+  fflush(stderr);
+
   if (!strand) {
     runtime_error("strand_entry_trampoline: no current strand");
   }
+
+  fprintf(stderr, "[TRAMPOLINE] About to call entry_func\n");
+  fflush(stderr);
 
   // Get the entry function and initial stack from the strand
   StackCell *(*entry_func)(StackCell *) = strand->entry_func;
