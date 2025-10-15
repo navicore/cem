@@ -236,8 +236,15 @@ test-stack-ops: build-runtime
     ./tests/test_stack_ops
     @echo "✅ Stack operation tests passed"
 
+# Test basic strand execution (debugging)
+test-basic-strand: build-runtime
+    @echo "Building basic strand tests..."
+    clang -Wall -Wextra -std=c11 -g tests/test_basic_strand.c -Lruntime -lcem_runtime -o tests/test_basic_strand
+    ./tests/test_basic_strand
+    @echo "✅ Basic strand tests passed"
+
 # Run all runtime tests (Phase 3)
-test-all-runtime: test-runtime test-scheduler test-context test-cleanup test-io-cleanup test-stack-growth test-stack-ops
+test-all-runtime: test-runtime test-scheduler test-context test-cleanup test-io-cleanup test-basic-strand test-stack-growth test-stack-ops
     @echo ""
     @echo "🎉 All runtime tests passed!"
 
