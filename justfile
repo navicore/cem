@@ -158,7 +158,7 @@ bench:
     cargo bench
 
 # Full CI check (what CI will run)
-ci: lint-all test build-runtime test-context
+ci: lint-all test build-runtime test-all-runtime
     @echo "✅ All CI checks passed!"
 
 # Quick pre-commit check
