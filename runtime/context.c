@@ -82,8 +82,13 @@ void cem_makecontext(cem_context_t *ctx, void *stack_base, size_t stack_size,
   fprintf(stderr, "[MAKECONTEXT] func=%p\n", (void*)func);
   fflush(stderr);
 
-  // Align to 16 bytes (required by x86-64 ABI)
+  // Align to 16 bytes (required by x86-64 ABI before 'call')
   stack_top &= ~15ULL;
+
+  // After 'ret', rsp will be incremented by 8, so we need rsp to be
+  // 16-byte aligned BEFORE 'ret', which means it should be at (16n + 8)
+  // But we just aligned to 16, so subtract 8 to get to (16n + 8)
+  stack_top -= 8;
 
   // Reserve space for red zone (128 bytes below rsp)
   // The red zone is a 128-byte area below rsp that functions can use
