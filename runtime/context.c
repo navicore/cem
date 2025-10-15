@@ -85,6 +85,12 @@ void cem_makecontext(cem_context_t *ctx, void *stack_base, size_t stack_size,
   // Align to 16 bytes (required by x86-64 ABI)
   stack_top &= ~15ULL;
 
+  // Reserve space for red zone (128 bytes below rsp)
+  // The red zone is a 128-byte area below rsp that functions can use
+  // without adjusting rsp. We need to make sure we don't put our
+  // return address there.
+  stack_top -= 128;
+
   // Push the function address onto the stack
   // This will be the return address that 'ret' will jump to
   stack_top -= sizeof(void *);
