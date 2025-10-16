@@ -234,6 +234,13 @@ StackCell *call_quotation(StackCell *stack);
  */
 StackCell *if_then_else(StackCell *stack);
 
+/**
+ * exit_op ( Int -- )
+ * Exit the program with the given exit code
+ * Named exit_op to avoid conflict with stdlib exit()
+ */
+void exit_op(StackCell *stack);
+
 // ============================================================================
 // Utility Functions
 // ============================================================================

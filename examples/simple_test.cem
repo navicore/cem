@@ -1,0 +1,15 @@
+: main ( -- )
+  "Test 1: 2 + 3 = 5" write_line
+  2 3 + int-to-string write_line
+
+  "Test 2: 6 * 7 = 42" write_line
+  6 7 * int-to-string write_line
+
+  "Test 3: 3 < 5 is true" write_line
+  3 5 < bool-to-string write_line
+
+  "Test 4: 42 = 42 is true" write_line
+  42 42 = bool-to-string write_line
+
+  "Tests complete" write_line
+;

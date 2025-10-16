@@ -1,0 +1,26 @@
+: test1 ( -- )
+  "Test 1: 2 + 3 = 5" write_line
+  2 3 + 5 =
+  if [ "PASS 1" write_line ] [ "FAIL 1" write_line 1 exit ]
+;
+
+: test2 ( -- )
+  "Test 2: 6 * 7 = 42" write_line
+  6 7 * 42 =
+  if [ "PASS 2" write_line ] [ "FAIL 2" write_line 1 exit ]
+;
+
+: test3 ( -- )
+  "Test 3: 10 - 4 = 6" write_line
+  10 4 - 6 =
+  if [ "PASS 3" write_line ] [ "FAIL 3" write_line 1 exit ]
+;
+
+: main ( -- )
+  "Running Cem Test Suite" write_line
+  test1
+  test2
+  test3
+  "All tests passed!" write_line
+  0 exit
+;
