@@ -105,7 +105,7 @@ void print_stack(StackCell *stack) {
 // Stack Operations
 // ============================================================================
 
-StackCell *dup(StackCell *stack) {
+StackCell *stack_dup(StackCell *stack) {
   if (!stack) {
     runtime_error("dup: stack underflow");
   }

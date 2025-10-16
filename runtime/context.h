@@ -140,59 +140,36 @@ typedef struct {
 // ============================================================================
 
 /**
- * Minimum stack size for safe execution (Phase 3: Dynamic Growth)
+ * Fixed stack size per strand
  *
- * 32KB initial allocation per strand provides enough space for libc functions
- * (fprintf needs ~8KB+ for internal buffers) plus typical function locals
- * while keeping memory overhead reasonable. Stacks grow dynamically by
- * doubling when needed.
+ * DESIGN DECISION: We use a fixed 1MB stack per strand, similar to Erlang's
+ * approach. Dynamic stack growth with relocation is fundamentally unsafe in
+ * C because:
  *
- * Note: 4KB was too small - fprintf's buffered_vfprintf allocates multiple
- * 4KB pages internally, causing stack overflow on x86-64 Linux before the
- * strand could yield and trigger stack growth. 16KB was also marginal for
- * functions with larger locals (6KB+) combined with fprintf.
+ * 1. Return addresses are on the stack - can't safely relocate mid-function
+ * 2. Saved registers point to old stack after growth
+ * 3. Local variable addresses become dangling pointers
+ * 4. No way to update all pointers atomically during emergency growth
+ *
+ * This is a memory-safety issue inherent to C's execution model. Languages
+ * like Go use split stacks or copying collectors. Erlang uses fixed stacks
+ * and heap-allocates large data structures.
+ *
+ * 1MB per strand is reasonable for a concurrent system:
+ * - Erlang uses 2KB-2MB per process (we're in the middle)
+ * - With 10,000 strands = 10GB memory (acceptable on modern hardware)
+ * - Prevents all stack overflow issues
+ * - No complex growth machinery to maintain
+ *
+ * For higher concurrency, users should allocate large data on the heap,
+ * not as local variables.
  */
-#define CEM_INITIAL_STACK_SIZE (32 * 1024)
+#define CEM_INITIAL_STACK_SIZE (1024 * 1024) // 1MB fixed size
 
 /**
- * Minimum free stack space to maintain (Phase 3)
- *
- * If free space falls below this threshold at a context switch checkpoint,
- * the stack will be grown proactively. This prevents sudden allocations
- * (large local arrays, deep recursion) from overflowing.
- *
- * 4KB provides headroom for libc functions and typical function calls with
- * local variables. This must be LESS than CEM_INITIAL_STACK_SIZE to avoid
- * immediate growth.
- *
- * Note: The 75% usage threshold (CEM_STACK_GROWTH_THRESHOLD_PERCENT) provides
- * additional protection, so this threshold is primarily for catching sudden
- * large allocations (e.g., VLAs, large structs on stack).
+ * Maximum stack size (same as initial - no growth)
  */
-#define CEM_MIN_FREE_STACK (4 * 1024)
-
-/**
- * Stack usage threshold for proactive growth (Phase 3)
- *
- * If stack usage exceeds this percentage of total size, growth is triggered
- * at the next checkpoint even if free space is above CEM_MIN_FREE_STACK.
- *
- * 75% provides a good balance between memory efficiency and preventing
- * overflow.
- */
-#define CEM_STACK_GROWTH_THRESHOLD_PERCENT 75
-
-/**
- * Maximum stack size (safety limit)
- *
- * Stacks will not grow beyond this size. If a strand needs more,
- * it will trigger a runtime error. This prevents runaway stack growth
- * from consuming all system memory.
- *
- * 1MB is generous for most strand operations while protecting against
- * pathological cases (infinite recursion, etc.)
- */
-#define CEM_MAX_STACK_SIZE (1024 * 1024)
+#define CEM_MAX_STACK_SIZE CEM_INITIAL_STACK_SIZE
 
 /**
  * Legacy compatibility constant

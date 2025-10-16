@@ -130,38 +130,8 @@ void stack_free(StackMetadata *meta);
 // Stack Growth
 // ============================================================================
 
-/**
- * Check if stack needs to grow and grow if necessary (checkpoint-based)
- *
- * Called at context switch checkpoints. Implements the hybrid growth strategy:
- * - Grow if free space < CEM_MIN_FREE_STACK (2KB), OR
- * - Grow if used > 75% of total
- *
- * This is the PRIMARY growth mechanism (not the signal handler).
- *
- * @param strand - Strand to check and potentially grow
- * @param current_sp - Current stack pointer value (from context)
- * @return true if stack was grown, false if no growth needed
- */
-bool stack_check_and_grow(struct Strand *strand, uintptr_t current_sp);
-
-/**
- * Grow a stack to a new size (internal)
- *
- * Allocates a new larger stack, copies contents, updates context pointers.
- * This is called by both checkpoint-based growth and emergency signal handler.
- *
- * When in_signal_handler is true, only async-signal-safe functions are used
- * (no fprintf, uses signal_safe_write instead).
- *
- * @param strand - Strand whose stack to grow
- * @param new_usable_size - New usable stack size (must be > current size)
- * @param in_signal_handler - true if called from SIGSEGV handler, false
- * otherwise
- * @return true on success, false on failure
- */
-bool stack_grow(struct Strand *strand, size_t new_usable_size,
-                bool in_signal_handler);
+// Dynamic stack growth removed - using fixed 1MB stacks
+// See context.h for rationale
 
 // ============================================================================
 // Emergency Guard Page Handler

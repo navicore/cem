@@ -42,7 +42,7 @@ void test_dup() {
 
     // Test: 1 2 3 dup -> 1 2 3 3
     StackCell* stack = make_stack_3(1, 2, 3);
-    stack = dup(stack);
+    stack = stack_dup(stack);
     assert_stack_ints(stack, 4, 3, 3, 2, 1);
     free_stack(stack);
 
@@ -129,7 +129,7 @@ void test_string_dup() {
 
     StackCell* stack = NULL;
     stack = push_string(stack, "hello");
-    stack = dup(stack);
+    stack = stack_dup(stack);
 
     assert(stack != NULL);
     assert(stack->tag == TAG_STRING);
@@ -159,7 +159,7 @@ void test_bool_operations() {
     assert(stack->next->value.b == false);
 
     // Test dup with bools
-    stack = dup(stack);
+    stack = stack_dup(stack);
     assert(stack->value.b == true);
     assert(stack->next->value.b == true);
 

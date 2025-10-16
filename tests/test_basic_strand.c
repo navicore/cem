@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <unistd.h>
 #include "../runtime/scheduler.h"
 
 static int test_count = 0;
@@ -20,11 +21,10 @@ static int test_count = 0;
 static bool minimal_ran = false;
 
 StackCell* strand_minimal(StackCell* stack) {
-    fprintf(stderr, "[TEST1] Minimal strand started\n");
-    fflush(stderr);
+    // Use signal-safe write to avoid fprintf buffering issues
+    write(2, "[TEST1] Minimal strand started\n", 32);
     minimal_ran = true;
-    fprintf(stderr, "[TEST1] Minimal strand returning\n");
-    fflush(stderr);
+    write(2, "[TEST1] Minimal strand returning\n", 34);
     return stack;
 }
 
@@ -62,15 +62,13 @@ void test_minimal_strand(void) {
 static bool small_locals_ran = false;
 
 StackCell* strand_small_locals(StackCell* stack) {
-    fprintf(stderr, "[TEST2] Strand with 64B locals started\n");
-    fflush(stderr);
+    write(2, "[TEST2] Strand with 64B locals started\n", 40);
 
     char buffer[64];
     buffer[0] = 1;
     buffer[63] = 2;
 
-    fprintf(stderr, "[TEST2] Locals allocated and used\n");
-    fflush(stderr);
+    write(2, "[TEST2] Locals allocated and used\n", 35);
     small_locals_ran = true;
     return stack;
 }
@@ -100,15 +98,13 @@ void test_small_locals(void) {
 static bool medium_locals_ran = false;
 
 StackCell* strand_medium_locals(StackCell* stack) {
-    fprintf(stderr, "[TEST3] Strand with 1KB locals started\n");
-    fflush(stderr);
+    write(2, "[TEST3] Strand with 1KB locals started\n", 40);
 
     char buffer[1024];
     buffer[0] = 1;
     buffer[1023] = 2;
 
-    fprintf(stderr, "[TEST3] 1KB locals allocated and used\n");
-    fflush(stderr);
+    write(2, "[TEST3] 1KB locals allocated and used\n", 39);
     medium_locals_ran = true;
     return stack;
 }
@@ -138,15 +134,13 @@ void test_medium_locals(void) {
 static bool large_locals_ran = false;
 
 StackCell* strand_large_locals(StackCell* stack) {
-    fprintf(stderr, "[TEST4] Strand with 2KB locals started\n");
-    fflush(stderr);
+    write(2, "[TEST4] Strand with 2KB locals started\n", 40);
 
     char buffer[2048];
     buffer[0] = 1;
     buffer[2047] = 2;
 
-    fprintf(stderr, "[TEST4] 2KB locals allocated and used\n");
-    fflush(stderr);
+    write(2, "[TEST4] 2KB locals allocated and used\n", 39);
     large_locals_ran = true;
     return stack;
 }
@@ -170,77 +164,74 @@ void test_large_locals(void) {
 }
 
 // ============================================================================
-// Test 5: Strand with 4KB local variable (exceeds initial stack)
+// Test 5: Strand with yielding (cooperative multitasking)
 // ============================================================================
 
-static bool xlarge_locals_ran = false;
+static int yield_counter = 0;
 
-StackCell* strand_xlarge_locals(StackCell* stack) {
-    fprintf(stderr, "[TEST5] Strand with 4KB locals started\n");
-    fflush(stderr);
+StackCell* strand_with_yields(StackCell* stack) {
+    write(2, "[TEST5] Strand with yielding started\n", 38);
 
-    char buffer[4096];
-    buffer[0] = 1;
-    buffer[4095] = 2;
+    for (int i = 0; i < 5; i++) {
+        yield_counter++;
+        strand_yield();  // Yield back to scheduler
+    }
 
-    fprintf(stderr, "[TEST5] 4KB locals allocated and used\n");
-    fflush(stderr);
-    xlarge_locals_ran = true;
+    write(2, "[TEST5] Strand completed after 5 yields\n", 41);
     return stack;
 }
 
-void test_xlarge_locals(void) {
-    printf("\n=== Test 5: Strand with 4KB local buffer (== initial stack size) ===\n");
+void test_yielding(void) {
+    printf("\n=== Test 5: Strand with yielding (cooperative multitasking) ===\n");
 
-    xlarge_locals_ran = false;
+    yield_counter = 0;
     scheduler_init();
-    strand_spawn(strand_xlarge_locals, NULL);
+    strand_spawn(strand_with_yields, NULL);
     scheduler_run();
     scheduler_shutdown();
 
-    if (xlarge_locals_ran) {
-        printf("✓ Strand with 4KB locals executed\n");
+    if (yield_counter == 5) {
+        printf("✓ Strand yielded 5 times correctly\n");
         test_count++;
     } else {
-        printf("✗ FAILED: Strand with 4KB locals did not execute\n");
+        printf("✗ FAILED: Expected 5 yields, got %d\n", yield_counter);
         exit(1);
     }
 }
 
 // ============================================================================
-// Test 6: Strand with 6KB local variable (REQUIRES stack growth)
+// Test 6: Multiple concurrent strands
 // ============================================================================
 
-static bool huge_locals_ran = false;
+static int multi_strand_counter = 0;
 
-StackCell* strand_huge_locals(StackCell* stack) {
-    fprintf(stderr, "[TEST6] Strand with 6KB locals started\n");
-    fflush(stderr);
-
-    char buffer[6 * 1024];
-    buffer[0] = 1;
-    buffer[6143] = 2;
-
-    fprintf(stderr, "[TEST6] 6KB locals allocated and used\n");
-    fflush(stderr);
-    huge_locals_ran = true;
+StackCell* counting_strand(StackCell* stack) {
+    for (int i = 0; i < 3; i++) {
+        multi_strand_counter++;
+        strand_yield();
+    }
     return stack;
 }
 
-void test_huge_locals(void) {
-    printf("\n=== Test 6: Strand with 6KB local buffer (REQUIRES stack growth) ===\n");
+void test_multiple_strands(void) {
+    printf("\n=== Test 6: Multiple concurrent strands ===\n");
 
-    huge_locals_ran = false;
+    multi_strand_counter = 0;
     scheduler_init();
-    strand_spawn(strand_huge_locals, NULL);
+
+    // Spawn 3 strands that each increment counter 3 times
+    strand_spawn(counting_strand, NULL);
+    strand_spawn(counting_strand, NULL);
+    strand_spawn(counting_strand, NULL);
+
     scheduler_run();
     scheduler_shutdown();
 
-    if (huge_locals_ran) {
-        printf("✓ Strand with 6KB locals executed\n");
+    if (multi_strand_counter == 9) {
+        printf("✓ Three strands executed concurrently (9 total increments)\n");
         test_count++;
     } else {
-        printf("✗ FAILED: Strand with 6KB locals did not execute\n");
+        printf("✗ FAILED: Expected 9 increments, got %d\n", multi_strand_counter);
         exit(1);
     }
 }
@@ -251,16 +242,15 @@ void test_huge_locals(void) {
 
 int main(void) {
     printf("=== Basic Strand Execution Tests ===\n");
-    printf("Initial stack size: 4KB\n");
-    printf("These tests progressively increase local variable size\n");
-    printf("to isolate exactly where the crash happens.\n\n");
+    printf("Fixed stack size: 1MB per strand\n");
+    printf("These tests verify strand execution and cooperative multitasking.\n\n");
 
     test_minimal_strand();
     test_small_locals();
     test_medium_locals();
     test_large_locals();
-    test_xlarge_locals();
-    test_huge_locals();
+    test_yielding();
+    test_multiple_strands();
 
     printf("\n=== Summary ===\n");
     printf("Passed: %d/6 tests\n", test_count);

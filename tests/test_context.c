@@ -46,11 +46,11 @@ void test_simple_context_switch(void) {
     memset(test_execution_order, 0, sizeof(test_execution_order));
 
     // Allocate stack for test context
-    void* stack = malloc(64 * 1024);
+    void* stack = malloc(CEM_INITIAL_STACK_SIZE);
     assert(stack != NULL);
 
     // Initialize context
-    cem_makecontext(&test_ctx1, stack, 64 * 1024, simple_func, NULL);
+    cem_makecontext(&test_ctx1, stack, CEM_INITIAL_STACK_SIZE, simple_func, NULL);
 
     // Switch to test context
     cem_swapcontext(&main_ctx, &test_ctx1);
@@ -84,10 +84,10 @@ void test_multiple_switches(void) {
     test_execution_index = 0;
     memset(test_execution_order, 0, sizeof(test_execution_order));
 
-    void* stack = malloc(64 * 1024);
+    void* stack = malloc(CEM_INITIAL_STACK_SIZE);
     assert(stack != NULL);
 
-    cem_makecontext(&test_ctx1, stack, 64 * 1024, ping_func, NULL);
+    cem_makecontext(&test_ctx1, stack, CEM_INITIAL_STACK_SIZE, ping_func, NULL);
 
     // First switch
     record(9);
@@ -138,13 +138,13 @@ void test_context_to_context_switch(void) {
     test_execution_index = 0;
     memset(test_execution_order, 0, sizeof(test_execution_order));
 
-    void* stack1 = malloc(64 * 1024);
-    void* stack2 = malloc(64 * 1024);
+    void* stack1 = malloc(CEM_INITIAL_STACK_SIZE);
+    void* stack2 = malloc(CEM_INITIAL_STACK_SIZE);
     assert(stack1 != NULL);
     assert(stack2 != NULL);
 
-    cem_makecontext(&test_ctx1, stack1, 64 * 1024, context_a, NULL);
-    cem_makecontext(&test_ctx2, stack2, 64 * 1024, context_b, NULL);
+    cem_makecontext(&test_ctx1, stack1, CEM_INITIAL_STACK_SIZE, context_a, NULL);
+    cem_makecontext(&test_ctx2, stack2, CEM_INITIAL_STACK_SIZE, context_b, NULL);
 
     // Start in context A
     cem_swapcontext(&main_ctx, &test_ctx1);
@@ -191,10 +191,10 @@ void test_stack_preservation(void) {
 
     stack_test_value = 0;
 
-    void* stack = malloc(64 * 1024);
+    void* stack = malloc(CEM_INITIAL_STACK_SIZE);
     assert(stack != NULL);
 
-    cem_makecontext(&test_ctx1, stack, 64 * 1024, stack_preservation_func, NULL);
+    cem_makecontext(&test_ctx1, stack, CEM_INITIAL_STACK_SIZE, stack_preservation_func, NULL);
 
     // First switch - context will use stack and return
     cem_swapcontext(&main_ctx, &test_ctx1);
@@ -241,10 +241,10 @@ void test_fp_preservation(void) {
 
     fp_test_value = 0.0;
 
-    void* stack = malloc(64 * 1024);
+    void* stack = malloc(CEM_INITIAL_STACK_SIZE);
     assert(stack != NULL);
 
-    cem_makecontext(&test_ctx1, stack, 64 * 1024, fp_preservation_func, NULL);
+    cem_makecontext(&test_ctx1, stack, CEM_INITIAL_STACK_SIZE, fp_preservation_func, NULL);
 
     // First switch
     cem_swapcontext(&main_ctx, &test_ctx1);
@@ -269,20 +269,17 @@ void test_fp_preservation(void) {
 void test_stack_size_assertion(void) {
     printf("Test 6: Stack size validation\n");
 
-    void* stack = malloc(64 * 1024);
+    void* stack = malloc(CEM_INITIAL_STACK_SIZE);
     assert(stack != NULL);
 
-    // This should succeed (32KB is minimum for safe execution with libc functions)
-    cem_makecontext(&test_ctx1, stack, 32 * 1024, simple_func, NULL);
-
-    // Also test that larger stacks work
-    cem_makecontext(&test_ctx1, stack, 64 * 1024, simple_func, NULL);
+    // This should succeed (CEM_INITIAL_STACK_SIZE is minimum)
+    cem_makecontext(&test_ctx1, stack, CEM_INITIAL_STACK_SIZE, simple_func, NULL);
 
     // Note: Can't easily test assertion failure without crashing
     // In a real test harness, we'd use death tests
 
     free(stack);
-    printf("  ✓ Stack size validation works (32KB minimum)\n");
+    printf("  ✓ Stack size validation works\n");
 }
 
 int main(void) {

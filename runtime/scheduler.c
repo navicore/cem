@@ -655,11 +655,6 @@ StackCell *scheduler_run(void) {
       strand->state = STRAND_RUNNING;
       global_scheduler.current_strand = strand;
 
-      // Phase 3: Checkpoint-based stack growth check
-      // Before switching to the strand, check if its stack needs to grow
-      // This is the primary growth mechanism (emergency guard page is backup)
-      stack_check_and_grow(strand, CEM_CONTEXT_GET_SP(&strand->context));
-
       // Switch to strand
       // When strand yields or completes, we'll return here
       cem_swapcontext(&global_scheduler.scheduler_context, &strand->context);
