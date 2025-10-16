@@ -66,7 +66,7 @@ void test_stack_ops() {
   // Test dup: 42 dup => 42 42
   StackCell *stack = NULL;
   stack = push_int(stack, 42);
-  stack = dup(stack);
+  stack = stack_dup(stack);
   assert(stack->value.i == 42);
   assert(stack->next->value.i == 42);
   free_stack(stack);

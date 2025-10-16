@@ -5,9 +5,16 @@
  * and emergency guard page overflow detection.
  */
 
-// Enable MAP_ANONYMOUS and other POSIX extensions on Linux
+// Enable POSIX extensions
 #if defined(__linux__)
 #define _GNU_SOURCE
+#endif
+
+// macOS requires _XOPEN_SOURCE for ucontext.h
+// AND _DARWIN_C_SOURCE for MAP_ANON
+#if defined(__APPLE__)
+#define _XOPEN_SOURCE 700
+#define _DARWIN_C_SOURCE
 #endif
 
 #include "stack_mgmt.h"
@@ -20,40 +27,9 @@
 #include <sys/mman.h>
 #include <sys/types.h> // For ssize_t
 
-// Signal handling
-// On macOS/BSD: Use system headers (no conflicts with dup())
-// On Linux: Forward declare to avoid unistd.h (which conflicts with stack.h's
-// dup())
-#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) ||      \
-    defined(__NetBSD__)
+// Signal handling - use system headers on all platforms
 #include <signal.h>
-#else
-// Linux: Forward declare the types and functions we need
-typedef struct {
-  int si_signo;
-  int si_errno;
-  int si_code;
-  void *si_addr;
-  // ... other fields we don't use
-} siginfo_t;
-
-struct sigaction {
-  void (*sa_sigaction)(int, siginfo_t *, void *);
-  unsigned long sa_flags;
-  void (*sa_restorer)(void);
-  unsigned char sa_mask[128]; // Large enough for sigset_t
-};
-
-#define SA_SIGINFO 4
-#define SIGSEGV 11
-#define SIG_DFL ((void (*)(int))0)
-
-extern int sigaction(int sig, const struct sigaction *act,
-                     struct sigaction *oldact);
-extern int sigemptyset(void *set); // Take void* to avoid type mismatch
-extern void (*signal(int sig, void (*func)(int)))(int);
-extern int raise(int sig);
-#endif
+#include <ucontext.h> // For updating CPU registers in signal handler
 
 // Forward declare sysconf to avoid including unistd.h
 // (unistd.h conflicts with stack.h's dup() function)
@@ -641,56 +617,7 @@ bool stack_grow(struct Strand *strand, size_t new_usable_size,
   return true;
 }
 
-/**
- * Check if stack needs to grow (checkpoint-based)
- */
-bool stack_check_and_grow(struct Strand *strand, uintptr_t current_sp) {
-  assert(strand != NULL);
-  assert(strand->stack_meta != NULL);
-
-  StackMetadata *meta = strand->stack_meta;
-
-  // Calculate usage
-  size_t used = stack_get_used(meta, current_sp);
-  size_t free = stack_get_free(meta, current_sp);
-
-  // Hybrid growth strategy:
-  // 1. Grow if free space < MIN_FREE_STACK (8KB), OR
-  // 2. Grow if used > CEM_STACK_GROWTH_THRESHOLD_PERCENT of total
-
-  bool need_growth = false;
-  const char *reason = NULL;
-
-  if (free < CEM_MIN_FREE_STACK) {
-    need_growth = true;
-    reason = "free space below minimum";
-  } else if (used >
-             (meta->usable_size * CEM_STACK_GROWTH_THRESHOLD_PERCENT / 100)) {
-    need_growth = true;
-    reason = "usage above threshold";
-  }
-
-  if (!need_growth) {
-    return false;
-  }
-
-  // Grow by doubling (2x) with overflow check
-  if (meta->usable_size > SIZE_MAX / 2) {
-    fprintf(stderr,
-            "ERROR: Strand %llu stack size %zu cannot be doubled (overflow)\n",
-            (unsigned long long)strand->id, meta->usable_size);
-    return false;
-  }
-  size_t new_size = meta->usable_size * 2;
-
-  // Log reason
-  fprintf(
-      stderr,
-      "INFO: Strand %llu growing stack (%s): %zu/%zu bytes used, %zu free\n",
-      (unsigned long long)strand->id, reason, used, meta->usable_size, free);
-
-  return stack_grow(strand, new_size, false); // Not in signal handler
-}
+// stack_check_and_grow() removed - we use fixed 1MB stacks, no dynamic growth
 
 // ============================================================================
 // Guard Page Signal Handler
@@ -776,51 +703,44 @@ bool stack_is_guard_page_fault(uintptr_t addr, const StackMetadata *meta) {
  * If Cem ever becomes multi-threaded or preemptive, this code will need
  * atomic operations or locks.
  */
-static void stack_sigsegv_handler(int sig, siginfo_t *si, void *unused) {
+static void stack_sigsegv_handler(int sig, siginfo_t *si, void *ucontext_ptr) {
   (void)sig;
-  (void)unused;
+  (void)ucontext_ptr;
 
   uintptr_t fault_addr = (uintptr_t)si->si_addr;
 
   // Check if fault is in current strand's guard page
-  // This read is safe - see thread safety note above
   if (g_scheduler && g_scheduler->current_strand) {
     Strand *strand = g_scheduler->current_strand;
 
     if (stack_is_guard_page_fault(fault_addr, strand->stack_meta)) {
-      // EMERGENCY GROWTH - guard page was hit!
-      // Use async-signal-safe write() instead of fprintf()
-      signal_safe_write("\n");
-      signal_safe_write("========================================\n");
-      signal_safe_write("WARNING: Guard page hit!\n");
-      signal_safe_write("========================================\n");
-      signal_safe_write("This indicates the checkpoint heuristic failed to "
-                        "predict stack growth.\n");
-      signal_safe_write(
-          "The stack will be grown now, but this is a FALLBACK mechanism.\n");
-      signal_safe_write(
-          "Consider tuning CEM_MIN_FREE_STACK if this happens frequently.\n");
-      signal_safe_write("\n");
+      // FATAL: Stack overflow with 1MB fixed stack
+      // This indicates infinite recursion or excessive local variables
+      char msg[] = "\n"
+                   "========================================\n"
+                   "FATAL: Stack overflow detected\n"
+                   "========================================\n"
+                   "Each strand has a fixed 1MB stack.\n"
+                   "This overflow indicates either:\n"
+                   "  1. Infinite recursion\n"
+                   "  2. Excessive local variables\n"
+                   "  3. Very deep call stack\n"
+                   "\n"
+                   "Solution: Allocate large data on the heap,\n"
+                   "not as local variables.\n"
+                   "========================================\n";
 
-      strand->stack_meta->guard_hit = true;
+      extern ssize_t write(int, const void *, size_t);
+      write(2, msg, sizeof(msg) - 1);
 
-      // Attempt emergency growth
-      size_t new_size = strand->stack_meta->usable_size * 2;
-      if (stack_grow(strand, new_size,
-                     true)) { // IN SIGNAL HANDLER - use safe logging
-        signal_safe_write("INFO: Emergency growth succeeded\n");
-        // Return and retry the faulting instruction
-        return;
-      } else {
-        signal_safe_write(
-            "FATAL: Emergency growth failed - strand will crash\n");
-        // Fall through to default handler (crash)
-      }
+      // Abort - this is a programming error, not recoverable
+      signal(SIGSEGV, SIG_DFL);
+      raise(SIGSEGV);
+      return;
     }
   }
 
   // Not our stack overflow - re-raise signal for normal crash handling
-  signal_safe_write("SIGSEGV: not a guard page fault\n");
   signal(SIGSEGV, SIG_DFL);
   raise(SIGSEGV);
 }
@@ -829,9 +749,32 @@ static void stack_sigsegv_handler(int sig, siginfo_t *si, void *unused) {
  * Initialize SIGSEGV signal handler
  */
 void stack_guard_init_signal_handler(void) {
+  // CRITICAL: Set up alternate signal stack FIRST
+  // When a SIGSEGV occurs due to stack overflow, the signal handler cannot run
+  // on the same corrupt stack. We need a separate stack for the handler.
+
+  // Allocate alternate signal stack (SIGSTKSZ is typically 8KB)
+  extern int sigaltstack(const stack_t *, stack_t *); // Forward declare
+
+// Use a fixed size to avoid SIGSTKSZ macro redefinition warning
+#define ALT_STACK_SIZE 8192
+
+  static char alt_stack[ALT_STACK_SIZE];
+  stack_t ss;
+  ss.ss_sp = alt_stack;
+  ss.ss_size = sizeof(alt_stack);
+  ss.ss_flags = 0;
+
+  if (sigaltstack(&ss, NULL) == -1) {
+    fprintf(stderr, "WARNING: Failed to set alternate signal stack\n");
+    perror("sigaltstack");
+    // Continue anyway - handler will still be installed
+  }
+
+  // Now install the signal handler with SA_ONSTACK
   struct sigaction sa;
 
-  sa.sa_flags = SA_SIGINFO;
+  sa.sa_flags = SA_SIGINFO | SA_ONSTACK; // CRITICAL: SA_ONSTACK
   sigemptyset(&sa.sa_mask);
   sa.sa_sigaction = stack_sigsegv_handler;
 

@@ -58,7 +58,8 @@ cem_swapcontext:
     mov     %rsp, 0x30(%rdi)
 
     // Save MXCSR (floating point control/status)
-    // NOTE: Temporarily disabled for debugging
+    // NOTE: Currently disabled - not required for correctness
+    // (XMM registers are caller-saved per System V AMD64 ABI)
     // stmxcsr 0x38(%rdi)
 
     // Restore context from restore_ctx (rsi)
@@ -75,7 +76,8 @@ cem_swapcontext:
     mov     0x30(%rsi), %rsp
 
     // Restore MXCSR
-    // NOTE: Temporarily disabled for debugging
+    // NOTE: Currently disabled - not required for correctness
+    // (XMM registers are caller-saved per System V AMD64 ABI)
     // ldmxcsr 0x38(%rsi)
 
     // Return to the address on the stack

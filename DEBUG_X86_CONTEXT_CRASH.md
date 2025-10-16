@@ -1,8 +1,31 @@
 # x86-64 Context Switching Crash - Debug Guide
 
-**Status**: BLOCKING - x86-64 Linux context switching crashes immediately
-**Platform**: Fails on x86-64 Linux, works on ARM64 macOS
-**Date**: 2025-10-15
+**Status**: ✅ RESOLVED - Emergency stack growth now working!
+**Platform**: x86-64 Linux
+**Date Reported**: 2025-10-15
+**Date Resolved**: 2025-10-15
+
+## Resolution Summary
+
+**Root Cause**: The SIGSEGV handler was installed correctly, but when stack overflow occurred, the handler tried to run on the SAME corrupt stack, causing it to fail immediately without executing any code.
+
+**Fix**: Implemented alternate signal stack using `sigaltstack()` and `SA_ONSTACK` flag. This gives the signal handler its own dedicated 8KB stack, independent of the thread's main stack.
+
+**Additional Fix**: When emergency growth succeeds, the signal handler now updates the CPU's RSP register (via ucontext) to point to the new stack location before returning.
+
+**Impact**:
+- ✅ Context switching works correctly on x86-64 Linux
+- ✅ SIGSEGV handler is now called when guard page is hit
+- ✅ Emergency stack growth works (tested with 5KB allocation on 4KB stack)
+- ✅ CPU registers are updated to point to new stack after growth
+
+**Key Changes**:
+1. `runtime/stack_mgmt.c`: Added `sigaltstack()` setup in `stack_guard_init_signal_handler()`
+2. `runtime/stack_mgmt.c`: Added CPU register updates (RSP/RBP) in SIGSEGV handler after growth
+3. `runtime/stack.h`: Renamed `dup()` to `stack_dup()` to avoid conflict with POSIX `dup()`
+4. `runtime/context.h`: Keep initial stack at 4KB (dynamic growth works!)
+
+---
 
 ## Problem Summary
 

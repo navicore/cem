@@ -80,7 +80,7 @@ typedef struct StackCell {
  * dup ( A -- A A )
  * Duplicate the top element of the stack
  */
-StackCell *dup(StackCell *stack);
+StackCell *stack_dup(StackCell *stack);
 
 /**
  * drop ( A -- )
