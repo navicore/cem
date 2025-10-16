@@ -5,9 +5,16 @@
  * and emergency guard page overflow detection.
  */
 
-// Enable MAP_ANONYMOUS and other POSIX extensions on Linux
+// Enable POSIX extensions
 #if defined(__linux__)
 #define _GNU_SOURCE
+#endif
+
+// macOS requires _XOPEN_SOURCE for ucontext.h
+// AND _DARWIN_C_SOURCE for MAP_ANON
+#if defined(__APPLE__)
+#define _XOPEN_SOURCE 700
+#define _DARWIN_C_SOURCE
 #endif
 
 #include "stack_mgmt.h"
