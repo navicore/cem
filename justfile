@@ -173,6 +173,8 @@ build-runtime:
     cd runtime && clang -Wall -Wextra -std=c11 -g -O2 -fno-omit-frame-pointer -c scheduler.c -o scheduler.o
     cd runtime && clang -Wall -Wextra -std=c11 -g -O2 -fno-omit-frame-pointer -c io.c -o io.o
     cd runtime && clang -Wall -Wextra -std=c11 -g -O2 -fno-omit-frame-pointer -c stack_mgmt.c -o stack_mgmt.o
+    cd runtime && clang -Wall -Wextra -std=c11 -g -O2 -fno-omit-frame-pointer -c compare.c -o compare.o
+    cd runtime && clang -Wall -Wextra -std=c11 -g -O2 -fno-omit-frame-pointer -c convert.c -o convert.o
     #!/usr/bin/env bash
     if [ "{{arch()}}" = "aarch64" ] || [ "{{arch()}}" = "arm64" ]; then \
         echo "Building for ARM64..."; \
@@ -184,7 +186,7 @@ build-runtime:
         echo "Unsupported architecture: {{arch()}}"; \
         exit 1; \
     fi
-    cd runtime && ar rcs libcem_runtime.a stack.o context.o context_asm.o scheduler.o io.o stack_mgmt.o
+    cd runtime && ar rcs libcem_runtime.a stack.o context.o context_asm.o scheduler.o io.o stack_mgmt.o compare.o convert.o
     @echo "✅ Built runtime/libcem_runtime.a for {{arch()}}"
 
 # Build runtime test program

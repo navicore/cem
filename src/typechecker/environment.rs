@@ -209,6 +209,12 @@ impl Environment {
             Effect::from_vecs(vec![Type::Int, Type::Int], vec![Type::Bool]),
         );
 
+        // !=: ( Int Int -- Bool )
+        self.add_word(
+            "!=".to_string(),
+            Effect::from_vecs(vec![Type::Int, Type::Int], vec![Type::Bool]),
+        );
+
         // clone: ( A -- A A ) for explicit cloning
         self.add_word(
             "clone".to_string(),
@@ -218,6 +224,26 @@ impl Environment {
                     .push(Type::Var("A".to_string()))
                     .push(Type::Var("A".to_string())),
             },
+        );
+
+        // Type conversions
+        // int-to-string: ( Int -- String )
+        self.add_word(
+            "int-to-string".to_string(),
+            Effect::from_vecs(vec![Type::Int], vec![Type::String]),
+        );
+
+        // bool-to-string: ( Bool -- String )
+        self.add_word(
+            "bool-to-string".to_string(),
+            Effect::from_vecs(vec![Type::Bool], vec![Type::String]),
+        );
+
+        // exit: ( Int -- )
+        // Note: This function never returns, but we model it as consuming Int and producing empty stack
+        self.add_word(
+            "exit".to_string(),
+            Effect::from_vecs(vec![Type::Int], vec![]),
         );
     }
 

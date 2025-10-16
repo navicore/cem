@@ -630,3 +630,30 @@ StackCell *if_then_else(StackCell *stack) {
   runtime_error("if_then_else: not yet implemented");
   return stack;
 }
+
+// ============================================================================
+// Exit operation
+// ============================================================================
+
+/**
+ * exit_op: ( Int -- )
+ * Exit the program with the given exit code
+ * Named exit_op to avoid conflict with stdlib exit()
+ */
+void exit_op(StackCell *stack) {
+  if (!stack) {
+    // No value on stack, exit with 0
+    exit(0);
+  }
+
+  if (stack->tag != TAG_INT) {
+    runtime_error("cem_exit: expected Int on top of stack");
+  }
+
+  int exit_code = (int)stack->value.i;
+
+  // Free the stack before exiting
+  free_stack(stack);
+
+  exit(exit_code);
+}

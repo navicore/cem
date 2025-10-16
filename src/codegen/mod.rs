@@ -43,7 +43,9 @@ use std::process::Command;
 /// Main code generator
 pub struct CodeGen {
     output: String,
+    string_globals: String, // Separate area for string constant declarations
     temp_counter: usize,
+    string_counter: usize, // Separate counter for string constants (never reset)
     current_block: String, // Track the current basic block label we're emitting into
     metadata_counter: usize, // Counter for debug metadata IDs
     file_metadata: std::collections::HashMap<String, usize>, // filename -> metadata ID
@@ -51,6 +53,7 @@ pub struct CodeGen {
     word_subprograms: Vec<(String, usize, usize, usize)>, // (word_name, file_id, line, subprogram_id)
     current_subprogram_id: Option<usize>, // ID of the current function's DISubprogram
     debug_locations: std::collections::HashMap<(usize, usize, usize, usize), usize>, // (file_id, line, col, scope) -> DILocation ID
+    string_constants: std::collections::HashMap<String, String>, // string content -> global name (@.str.N)
 }
 
 impl CodeGen {
@@ -58,7 +61,9 @@ impl CodeGen {
     pub fn new() -> Self {
         CodeGen {
             output: String::new(),
+            string_globals: String::new(),
             temp_counter: 0,
+            string_counter: 0,
             current_block: "entry".to_string(),
             metadata_counter: 0,
             file_metadata: std::collections::HashMap::new(),
@@ -66,6 +71,7 @@ impl CodeGen {
             word_subprograms: Vec::new(),
             current_subprogram_id: None,
             debug_locations: std::collections::HashMap::new(),
+            string_constants: std::collections::HashMap::new(),
         }
     }
 
@@ -97,6 +103,30 @@ impl CodeGen {
             }
         }
         result
+    }
+
+    /// Map operator symbols to valid LLVM function names
+    /// LLVM doesn't allow symbols like +, -, <, > as function names
+    /// Also maps hyphenated Cem names to underscore C names
+    fn map_operator_to_function(name: &str) -> String {
+        match name {
+            // Arithmetic operators
+            "+" => "add".to_string(),
+            "-" => "subtract".to_string(),
+            "*" => "multiply".to_string(),
+            "/" => "divide".to_string(),
+            // Comparison operators
+            "<" => "int_less".to_string(),
+            ">" => "int_greater".to_string(),
+            "<=" => "int_less_equal".to_string(),
+            ">=" => "int_greater_equal".to_string(),
+            "=" => "int_equal".to_string(),
+            "!=" => "int_not_equal".to_string(),
+            // Special functions
+            "exit" => "exit_op".to_string(), // Avoid conflict with stdlib exit()
+            // For hyphenated names, replace hyphens with underscores
+            _ => name.replace('-', "_"),
+        }
     }
 
     /// Compile a complete program to LLVM IR
@@ -149,7 +179,10 @@ impl CodeGen {
         // Emit debug metadata footer (compile unit and module flags)
         self.emit_debug_info_footer()?;
 
-        Ok(self.output.clone())
+        // Prepend string constants to output
+        let final_output = self.string_globals.clone() + &self.output;
+
+        Ok(final_output)
     }
 
     /// Get the target triple by querying clang
@@ -193,7 +226,14 @@ impl CodeGen {
         }
 
         // Comparisons (ptr -> ptr)
-        for func in &["less_than", "greater_than", "equal"] {
+        for func in &[
+            "int_less",
+            "int_greater",
+            "int_less_equal",
+            "int_greater_equal",
+            "int_equal",
+            "int_not_equal",
+        ] {
             writeln!(&mut self.output, "declare ptr @{}(ptr)", func)
                 .map_err(|e| CodegenError::InternalError(e.to_string()))?;
         }
@@ -218,6 +258,16 @@ impl CodeGen {
         writeln!(&mut self.output, "declare ptr @string_concat(ptr)")
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
         writeln!(&mut self.output, "declare ptr @string_equal(ptr)")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+        // Type conversions
+        writeln!(&mut self.output, "declare ptr @int_to_string(ptr)")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output, "declare ptr @bool_to_string(ptr)")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+        // Exit operation
+        writeln!(&mut self.output, "declare void @exit_op(ptr)")
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
         // Scheduler operations (testing)
@@ -614,10 +664,11 @@ impl CodeGen {
             Expr::WordCall(name, loc) if in_tail_position => {
                 let result = self.fresh_temp();
                 let dbg = self.dbg_annotation(loc);
+                let func_name = Self::map_operator_to_function(name);
                 writeln!(
                     &mut self.output,
                     "  %{} = musttail call ptr @{}(ptr %{}){}",
-                    result, name, stack, dbg
+                    result, func_name, stack, dbg
                 )
                 .map_err(|e| CodegenError::InternalError(e.to_string()))?;
                 Ok(result)
@@ -656,20 +707,33 @@ impl CodeGen {
             }
 
             Expr::StringLit(s, loc) => {
-                // Create global string constant
-                let str_global = format!("@.str.{}", self.temp_counter);
-                let escaped = Self::escape_llvm_string(s);
-                // Length is original byte count - escaping is just text representation.
-                // E.g., "a\"b" is 3 bytes even though we write it as 5 chars in IR text.
-                // UTF-8 chars like "😀" (4 bytes) escape to "\F0\9F\98\80" but still represent 4 bytes.
-                let str_len = s.len() + 1; // +1 for null terminator
+                // Check if we've already emitted this string constant
+                let str_global = if let Some(existing) = self.string_constants.get(s) {
+                    existing.clone()
+                } else {
+                    // Create new global string constant
+                    let str_global = format!("@.str.{}", self.string_counter);
+                    self.string_counter += 1; // Increment for the string global itself
 
-                // Emit global at top of file (we'll prepend it later)
-                let global_decl = format!(
-                    "{} = private unnamed_addr constant [{} x i8] c\"{}\\00\"\n",
-                    str_global, str_len, escaped
-                );
-                self.output = global_decl + &self.output;
+                    let escaped = Self::escape_llvm_string(s);
+                    // Length is original byte count - escaping is just text representation.
+                    // E.g., "a\"b" is 3 bytes even though we write it as 5 chars in IR text.
+                    // UTF-8 chars like "😀" (4 bytes) escape to "\F0\9F\98\80" but still represent 4 bytes.
+                    let str_len = s.len() + 1; // +1 for null terminator
+
+                    // Emit global to string_globals area
+                    let global_decl = format!(
+                        "{} = private unnamed_addr constant [{} x i8] c\"{}\\00\"\n",
+                        str_global, str_len, escaped
+                    );
+                    self.string_globals.push_str(&global_decl);
+
+                    // Remember this string for deduplication
+                    self.string_constants.insert(s.clone(), str_global.clone());
+                    str_global
+                };
+
+                let str_len = s.len() + 1; // +1 for null terminator
 
                 // Allocate temps in the order they'll be used in the IR
                 let ptr_temp = self.fresh_temp();
@@ -695,10 +759,11 @@ impl CodeGen {
             Expr::WordCall(name, loc) => {
                 let result = self.fresh_temp();
                 let dbg = self.dbg_annotation(loc);
+                let func_name = Self::map_operator_to_function(name);
                 writeln!(
                     &mut self.output,
                     "  %{} = call ptr @{}(ptr %{}){}",
-                    result, name, stack, dbg
+                    result, func_name, stack, dbg
                 )
                 .map_err(|e| CodegenError::InternalError(e.to_string()))?;
                 Ok(result)

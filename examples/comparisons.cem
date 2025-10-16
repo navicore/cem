@@ -1,0 +1,38 @@
+: main ( -- )
+  "Testing comparison operators with visible output:" write_line
+  "" write_line
+
+  "Testing: 3 < 5" write_line
+  3 5 < bool-to-string write_line
+  "" write_line
+
+  "Testing: 7 > 2" write_line
+  7 2 > bool-to-string write_line
+  "" write_line
+
+  "Testing: 5 <= 5" write_line
+  5 5 <= bool-to-string write_line
+  "" write_line
+
+  "Testing: 10 >= 8" write_line
+  10 8 >= bool-to-string write_line
+  "" write_line
+
+  "Testing: 42 = 42" write_line
+  42 42 = bool-to-string write_line
+  "" write_line
+
+  "Testing: 3 != 7" write_line
+  3 7 != bool-to-string write_line
+  "" write_line
+
+  "Testing: 3 = 7" write_line
+  3 7 = bool-to-string write_line
+  "" write_line
+
+  "Testing int-to-string with result of 6 * 7:" write_line
+  6 7 * int-to-string write_line
+  "" write_line
+
+  "All tests completed!" write_line
+;
