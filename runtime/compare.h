@@ -16,21 +16,21 @@
  */
 
 // <  : ( Int Int -- Bool )
-StackCell *LT(StackCell *stack); // Less than
+StackCell *int_less(StackCell *stack);
 
 // >  : ( Int Int -- Bool )
-StackCell *GT(StackCell *stack); // Greater than
+StackCell *int_greater(StackCell *stack);
 
 // <= : ( Int Int -- Bool )
-StackCell *LE(StackCell *stack); // Less or equal
+StackCell *int_less_equal(StackCell *stack);
 
 // >= : ( Int Int -- Bool )
-StackCell *GE(StackCell *stack); // Greater or equal
+StackCell *int_greater_equal(StackCell *stack);
 
 // =  : ( Int Int -- Bool )
-StackCell *EQ(StackCell *stack); // Equal
+StackCell *int_equal(StackCell *stack);
 
 // != : ( Int Int -- Bool )
-StackCell *NE(StackCell *stack); // Not equal
+StackCell *int_not_equal(StackCell *stack);
 
 #endif // CEM_COMPARE_H

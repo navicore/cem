@@ -31,12 +31,7 @@ StackCell *int_less(StackCell *stack) {
   free_cell(stack);
 
   // Push boolean result
-  StackCell *result = alloc_cell();
-  result->tag = TAG_BOOL;
-  result->value.b = (a < b);
-  result->next = rest;
-
-  return result;
+  return push_bool(rest, a < b);
 }
 
 /**
@@ -59,12 +54,7 @@ StackCell *int_greater(StackCell *stack) {
   free_cell(stack->next);
   free_cell(stack);
 
-  StackCell *result = alloc_cell();
-  result->tag = TAG_BOOL;
-  result->value.b = (a > b);
-  result->next = rest;
-
-  return result;
+  return push_bool(rest, a > b);
 }
 
 /**
@@ -87,12 +77,7 @@ StackCell *int_less_equal(StackCell *stack) {
   free_cell(stack->next);
   free_cell(stack);
 
-  StackCell *result = alloc_cell();
-  result->tag = TAG_BOOL;
-  result->value.b = (a <= b);
-  result->next = rest;
-
-  return result;
+  return push_bool(rest, a <= b);
 }
 
 /**
@@ -115,12 +100,7 @@ StackCell *int_greater_equal(StackCell *stack) {
   free_cell(stack->next);
   free_cell(stack);
 
-  StackCell *result = alloc_cell();
-  result->tag = TAG_BOOL;
-  result->value.b = (a >= b);
-  result->next = rest;
-
-  return result;
+  return push_bool(rest, a >= b);
 }
 
 /**
@@ -143,12 +123,7 @@ StackCell *int_equal(StackCell *stack) {
   free_cell(stack->next);
   free_cell(stack);
 
-  StackCell *result = alloc_cell();
-  result->tag = TAG_BOOL;
-  result->value.b = (a == b);
-  result->next = rest;
-
-  return result;
+  return push_bool(rest, a == b);
 }
 
 /**
@@ -171,10 +146,5 @@ StackCell *int_not_equal(StackCell *stack) {
   free_cell(stack->next);
   free_cell(stack);
 
-  StackCell *result = alloc_cell();
-  result->tag = TAG_BOOL;
-  result->value.b = (a != b);
-  result->next = rest;
-
-  return result;
+  return push_bool(rest, a != b);
 }

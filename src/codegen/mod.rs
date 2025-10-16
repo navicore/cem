@@ -707,7 +707,10 @@ impl CodeGen {
             }
 
             Expr::StringLit(s, loc) => {
-                // Check if we've already emitted this string constant
+                // String deduplication: Check if we've already emitted this exact string content.
+                // Without this, identical strings like "hello" appearing multiple times in the
+                // source would create separate @.str.N globals for each occurrence, bloating
+                // the binary. By reusing the same global, we reduce IR size and memory usage.
                 let str_global = if let Some(existing) = self.string_constants.get(s) {
                     existing.clone()
                 } else {
@@ -728,7 +731,7 @@ impl CodeGen {
                     );
                     self.string_globals.push_str(&global_decl);
 
-                    // Remember this string for deduplication
+                    // Remember this string for deduplication in future occurrences
                     self.string_constants.insert(s.clone(), str_global.clone());
                     str_global
                 };

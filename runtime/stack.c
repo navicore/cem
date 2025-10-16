@@ -641,13 +641,14 @@ StackCell *if_then_else(StackCell *stack) {
  * Named exit_op to avoid conflict with stdlib exit()
  */
 void exit_op(StackCell *stack) {
+  // Validate stack has at least one element
+  // Type signature requires ( Int -- ), so empty stack is an error
   if (!stack) {
-    // No value on stack, exit with 0
-    exit(0);
+    runtime_error("exit_op: stack underflow (expected Int)");
   }
 
   if (stack->tag != TAG_INT) {
-    runtime_error("cem_exit: expected Int on top of stack");
+    runtime_error("exit_op: type error (expected Int)");
   }
 
   int exit_code = (int)stack->value.i;
