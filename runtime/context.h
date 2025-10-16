@@ -142,11 +142,17 @@ typedef struct {
 /**
  * Minimum stack size for safe execution (Phase 3: Dynamic Growth)
  *
- * 4KB initial allocation per strand provides enough space for most
- * operations while keeping memory overhead low. Stacks grow dynamically
- * by doubling when needed.
+ * 32KB initial allocation per strand provides enough space for libc functions
+ * (fprintf needs ~8KB+ for internal buffers) plus typical function locals
+ * while keeping memory overhead reasonable. Stacks grow dynamically by
+ * doubling when needed.
+ *
+ * Note: 4KB was too small - fprintf's buffered_vfprintf allocates multiple
+ * 4KB pages internally, causing stack overflow on x86-64 Linux before the
+ * strand could yield and trigger stack growth. 16KB was also marginal for
+ * functions with larger locals (6KB+) combined with fprintf.
  */
-#define CEM_INITIAL_STACK_SIZE 4096
+#define CEM_INITIAL_STACK_SIZE (32 * 1024)
 
 /**
  * Minimum free stack space to maintain (Phase 3)
@@ -155,14 +161,15 @@ typedef struct {
  * the stack will be grown proactively. This prevents sudden allocations
  * (large local arrays, deep recursion) from overflowing.
  *
- * 2KB provides headroom for typical function calls with local variables.
- * This must be LESS than CEM_INITIAL_STACK_SIZE to avoid immediate growth.
+ * 4KB provides headroom for libc functions and typical function calls with
+ * local variables. This must be LESS than CEM_INITIAL_STACK_SIZE to avoid
+ * immediate growth.
  *
  * Note: The 75% usage threshold (CEM_STACK_GROWTH_THRESHOLD_PERCENT) provides
  * additional protection, so this threshold is primarily for catching sudden
  * large allocations (e.g., VLAs, large structs on stack).
  */
-#define CEM_MIN_FREE_STACK 2048
+#define CEM_MIN_FREE_STACK (4 * 1024)
 
 /**
  * Stack usage threshold for proactive growth (Phase 3)

@@ -1,8 +1,25 @@
 # x86-64 Context Switching Crash - Debug Guide
 
-**Status**: BLOCKING - x86-64 Linux context switching crashes immediately
-**Platform**: Fails on x86-64 Linux, works on ARM64 macOS
-**Date**: 2025-10-15
+**Status**: ✅ RESOLVED - Stack size issue identified and fixed
+**Platform**: Now works on x86-64 Linux ✅ (previously only ARM64 macOS)
+**Date Reported**: 2025-10-15
+**Date Resolved**: 2025-10-15
+
+## Resolution Summary
+
+**Root Cause**: Initial stack size (4KB) was too small for libc functions like `fprintf()` which allocate ~8KB+ of internal buffers on the stack.
+
+**Fix**: Increased `CEM_INITIAL_STACK_SIZE` from 4KB to 32KB in `runtime/context.h`.
+
+**Impact**:
+- ✅ All 6 basic strand tests now pass
+- ✅ All context switching tests pass
+- ✅ Full CI suite passes
+- Memory overhead: ~28KB more per strand initially (grows dynamically as needed)
+
+---
+
+# Original Debug Log (for reference)
 
 ## Problem Summary
 
