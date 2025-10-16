@@ -77,11 +77,6 @@ void cem_makecontext(cem_context_t *ctx, void *stack_base, size_t stack_size,
   // stack_top (high address) is where the stack pointer starts
   uintptr_t stack_top = (uintptr_t)stack_base + stack_size;
 
-  fprintf(stderr, "[MAKECONTEXT] stack_base=%p, stack_size=%zu, stack_top=%p\n",
-          stack_base, stack_size, (void *)stack_top);
-  fprintf(stderr, "[MAKECONTEXT] func=%p\n", (void *)func);
-  fflush(stderr);
-
   // Align to 16 bytes (required by x86-64 ABI before 'call')
   stack_top &= ~15ULL;
 
@@ -100,10 +95,6 @@ void cem_makecontext(cem_context_t *ctx, void *stack_base, size_t stack_size,
   // This will be the return address that 'ret' will jump to
   stack_top -= sizeof(void *);
   *(void **)stack_top = (void *)func;
-
-  fprintf(stderr, "[MAKECONTEXT] Pushed func to stack at %p, rsp will be %p\n",
-          (void *)stack_top, (void *)stack_top);
-  fflush(stderr);
 
   // Note: Stack is now misaligned by 8 bytes (as expected after 'call')
   // This matches what swapcontext expects
