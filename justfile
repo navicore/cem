@@ -134,7 +134,7 @@ run-example NAME: build-examples
 # Clean build artifacts
 clean: clean-runtime
     cargo clean
-    rm -f *.o *.ll *_exe echo hello_io test_call test_dbg test_nested_if_debug
+    rm -f *.o *.ll *_exe echo hello_io test_call test_dbg
     rm -rf target/examples
     @echo "✅ Cleaned build artifacts"
 

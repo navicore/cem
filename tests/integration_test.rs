@@ -556,8 +556,9 @@ fn test_nested_if_expressions() {
     assert!(ir.contains("else_"), "Expected else branch labels");
     assert!(ir.contains("merge_"), "Expected merge block labels");
 
-    // Save IR for debugging
-    std::fs::write("test_nested_if_debug.ll", &ir).expect("Failed to write IR");
+    // Save IR for debugging in target/ directory (gitignored)
+    std::fs::create_dir_all("target").ok();
+    std::fs::write("target/test_nested_if_debug.ll", &ir).expect("Failed to write IR");
 
     link_program(&ir, "runtime/libcem_runtime.a", "test_nested_if_exe").expect("Failed to link");
 
@@ -571,6 +572,7 @@ fn test_nested_if_expressions() {
     // Clean up
     std::fs::remove_file("test_nested_if_exe").ok();
     std::fs::remove_file("test_nested_if_exe.ll").ok();
+    std::fs::remove_file("target/test_nested_if_debug.ll").ok();
 }
 
 #[test]
