@@ -99,10 +99,43 @@ lint-all: fmt-check fmt-c-check lint
 fix-fmt: fmt fmt-c
     @echo "✅ All code formatted!"
 
+# Build all examples into target/examples/
+# This keeps the workspace clean by placing binaries in target/ (like cargo does)
+build-examples: build-runtime build
+    #!/usr/bin/env bash
+    echo "Building examples..."
+    mkdir -p target/examples
+    SUCCESS=0
+    FAILED=0
+    for example in examples/*.cem; do
+        name=$(basename "$example" .cem)
+        echo -n "  $name... "
+        if cargo run --quiet -- compile "$example" -o "target/examples/$name" >/dev/null 2>&1; then
+            echo "✓"
+            SUCCESS=$((SUCCESS + 1))
+        else
+            echo "✗"
+            FAILED=$((FAILED + 1))
+        fi
+    done
+    echo ""
+    if [ $FAILED -eq 0 ]; then
+        echo "✅ Built all $SUCCESS examples to target/examples/"
+    else
+        echo "⚠️  Built $SUCCESS/$((SUCCESS + FAILED)) examples to target/examples/"
+    fi
+
+# Run a specific example (builds if needed)
+# Usage: just run-example hello_io
+run-example NAME: build-examples
+    @echo "Running {{NAME}}..."
+    @./target/examples/{{NAME}}
+
 # Clean build artifacts
 clean: clean-runtime
     cargo clean
     rm -f *.o *.ll *_exe echo hello_io test_call test_dbg test_nested_if_debug
+    rm -rf target/examples
     @echo "✅ Cleaned build artifacts"
 
 # Run the compiler (when main is implemented)

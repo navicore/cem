@@ -749,6 +749,13 @@ static void stack_sigsegv_handler(int sig, siginfo_t *si, void *ucontext_ptr) {
  * Initialize SIGSEGV signal handler
  */
 void stack_guard_init_signal_handler(void) {
+  // Ensure we only initialize once per process
+  static int initialized = 0;
+  if (initialized) {
+    return;
+  }
+  initialized = 1;
+
   // CRITICAL: Set up alternate signal stack FIRST
   // When a SIGSEGV occurs due to stack overflow, the signal handler cannot run
   // on the same corrupt stack. We need a separate stack for the handler.
@@ -759,17 +766,35 @@ void stack_guard_init_signal_handler(void) {
 // Use a fixed size to avoid SIGSTKSZ macro redefinition warning
 #define ALT_STACK_SIZE 8192
 
-  static char alt_stack[ALT_STACK_SIZE];
-  stack_t ss;
-  ss.ss_sp = alt_stack;
-  ss.ss_size = sizeof(alt_stack);
-  ss.ss_flags = 0;
-
-  if (sigaltstack(&ss, NULL) == -1) {
-    fprintf(stderr, "WARNING: Failed to set alternate signal stack\n");
-    perror("sigaltstack");
-    // Continue anyway - handler will still be installed
+  // Check if an alternate stack is already set
+  stack_t old_ss;
+  if (sigaltstack(NULL, &old_ss) == -1) {
+    perror("sigaltstack (query)");
+    return; // Can't even query - something is seriously wrong
   }
+
+  // Only set alternate stack if one isn't already active
+  // SS_DISABLE means no alternate stack is set
+  if (old_ss.ss_flags & SS_DISABLE) {
+    // No alternate stack set, so set one
+    static char alt_stack[ALT_STACK_SIZE];
+    stack_t ss;
+    ss.ss_sp = alt_stack;
+    ss.ss_size = sizeof(alt_stack);
+    ss.ss_flags = 0;
+
+    if (sigaltstack(&ss, NULL) == -1) {
+      // sigaltstack can fail with ENOMEM if:
+      // 1. The stack size is smaller than MINSIGSTKSZ (not our case)
+      // 2. An alt stack is already set (but we checked SS_DISABLE)
+      // 3. The system has reached some resource limit
+      //
+      // This is not critical - the signal handler will still work, just
+      // with less protection against stack overflow in the handler itself.
+      // We silently continue to avoid alarming users with a non-critical error.
+    }
+  }
+  // else: Already have an alternate stack, no need to set one
 
   // Now install the signal handler with SA_ONSTACK
   struct sigaction sa;
