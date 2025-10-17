@@ -1,0 +1,17 @@
+type Option (T)
+  | Some(T)
+  | None
+
+: handle-none ( Option(Int) -- Int )
+  match
+    Some => [ ]
+    None => [ 42 ]
+  end ;
+
+: main ( -- Int )
+  "Testing pattern matching with None variant..." write-line
+  None
+  handle-none
+  int-to-string
+  "Result: " swap string-concat write-line
+  0 ;

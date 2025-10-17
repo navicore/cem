@@ -55,6 +55,7 @@ pub struct CodeGen {
     debug_locations: std::collections::HashMap<(usize, usize, usize, usize), usize>, // (file_id, line, col, scope) -> DILocation ID
     string_constants: std::collections::HashMap<String, String>, // string content -> global name (@.str.N)
     variant_tags: std::collections::HashMap<String, u32>, // variant_name -> tag (index in type definition)
+    variant_field_counts: std::collections::HashMap<String, usize>, // variant_name -> number of fields
 }
 
 impl CodeGen {
@@ -74,6 +75,7 @@ impl CodeGen {
             debug_locations: std::collections::HashMap::new(),
             string_constants: std::collections::HashMap::new(),
             variant_tags: std::collections::HashMap::new(),
+            variant_field_counts: std::collections::HashMap::new(),
         }
     }
 
@@ -159,11 +161,13 @@ impl CodeGen {
         // Declare runtime functions
         self.emit_runtime_declarations()?;
 
-        // Build variant tag map from type definitions
+        // Build variant tag map and field count map from type definitions
         // Each variant gets a u32 tag corresponding to its index in the type's variant list
         for typedef in &program.type_defs {
             for (idx, variant) in typedef.variants.iter().enumerate() {
                 self.variant_tags.insert(variant.name.clone(), idx as u32);
+                self.variant_field_counts
+                    .insert(variant.name.clone(), variant.fields.len());
             }
         }
 
@@ -587,11 +591,12 @@ impl CodeGen {
         // Set current subprogram for debug location generation
         self.current_subprogram_id = Some(subprogram_id);
 
-        // Avoid name collision with C main() - prefix Cem "main" word with "cem_"
+        // Map word name to function name (handles operators and hyphenated names)
+        // Also avoid name collision with C main() - prefix Cem "main" word with "cem_"
         let function_name = if word.name == "main" {
             "cem_main".to_string()
         } else {
-            word.name.clone()
+            Self::map_operator_to_function(&word.name)
         };
 
         // Emit function definition with debug metadata attachment
@@ -782,16 +787,82 @@ impl CodeGen {
             }
 
             Expr::WordCall(name, loc) => {
-                let result = self.fresh_temp();
-                let dbg = self.dbg_annotation(loc);
-                let func_name = Self::map_operator_to_function(name);
-                writeln!(
-                    &mut self.output,
-                    "  %{} = call ptr @{}(ptr %{}){}",
-                    result, func_name, stack, dbg
-                )
-                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
-                Ok(result)
+                // Check if this is a variant constructor
+                if let Some(&tag) = self.variant_tags.get(name) {
+                    // This is a variant constructor - emit push_variant call
+                    let field_count = self.variant_field_counts.get(name).copied().unwrap_or(0);
+                    let result = self.fresh_temp();
+                    let dbg = self.dbg_annotation(loc);
+
+                    match field_count {
+                        0 => {
+                            // Unit variant (no fields) - pass NULL as data
+                            writeln!(
+                                &mut self.output,
+                                "  %{} = call ptr @push_variant(ptr %{}, i32 {}, ptr null){}",
+                                result, stack, tag, dbg
+                            )
+                            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                            Ok(result)
+                        }
+                        1 => {
+                            // Single-field variant - pop the field value and use it as data
+                            // The field is on top of stack, we need to extract it as a pointer
+                            // For now, we'll use the stack cell itself as the data
+                            // This works because the data pointer will point to the whole StackCell
+
+                            // Cast stack (which is a StackCell*) to void* for the data parameter
+                            let data_ptr = self.fresh_temp();
+                            writeln!(
+                                &mut self.output,
+                                "  %{} = bitcast ptr %{} to ptr",
+                                data_ptr, stack
+                            )
+                            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                            // Get rest of stack (pop the field)
+                            let rest_ptr = self.fresh_temp();
+                            writeln!(
+                                &mut self.output,
+                                "  %{} = getelementptr inbounds {{ i32, [4 x i8], [16 x i8], ptr }}, ptr %{}, i32 0, i32 3",
+                                rest_ptr, stack
+                            )
+                            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                            let rest = self.fresh_temp();
+                            writeln!(&mut self.output, "  %{} = load ptr, ptr %{}", rest, rest_ptr)
+                                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                            // Push variant with the popped cell as data
+                            writeln!(
+                                &mut self.output,
+                                "  %{} = call ptr @push_variant(ptr %{}, i32 {}, ptr %{}){}",
+                                result, rest, tag, data_ptr, dbg
+                            )
+                            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                            Ok(result)
+                        }
+                        _ => {
+                            // Multi-field variants not yet supported
+                            Err(CodegenError::InternalError(format!(
+                                "Variant constructor {} with {} fields not yet supported (only 0 or 1 fields)",
+                                name, field_count
+                            )))
+                        }
+                    }
+                } else {
+                    // Regular word call
+                    let result = self.fresh_temp();
+                    let dbg = self.dbg_annotation(loc);
+                    let func_name = Self::map_operator_to_function(name);
+                    writeln!(
+                        &mut self.output,
+                        "  %{} = call ptr @{}(ptr %{}){}",
+                        result, func_name, stack, dbg
+                    )
+                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                    Ok(result)
+                }
             }
 
             Expr::Quotation(exprs, _loc) => {
