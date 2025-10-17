@@ -67,7 +67,11 @@ impl Environment {
                 // Generic type: Option<T> => Option(T)
                 Type::Named {
                     name: typedef.name.clone(),
-                    args: typedef.type_params.iter().map(|p| Type::Var(p.clone())).collect(),
+                    args: typedef
+                        .type_params
+                        .iter()
+                        .map(|p| Type::Var(p.clone()))
+                        .collect(),
                 }
             };
 
@@ -75,10 +79,11 @@ impl Environment {
             // Input stack: variant fields (if any)
             // Output stack: the ADT type
             let effect = Effect {
-                inputs: variant.fields.iter().rev().fold(
-                    StackType::Empty,
-                    |stack, field| stack.push(field.clone())
-                ),
+                inputs: variant
+                    .fields
+                    .iter()
+                    .rev()
+                    .fold(StackType::Empty, |stack, field| stack.push(field.clone())),
                 outputs: StackType::Empty.push(result_type),
             };
 

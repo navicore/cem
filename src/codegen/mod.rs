@@ -830,8 +830,12 @@ impl CodeGen {
                             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
                             let rest = self.fresh_temp();
-                            writeln!(&mut self.output, "  %{} = load ptr, ptr %{}", rest, rest_ptr)
-                                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                            writeln!(
+                                &mut self.output,
+                                "  %{} = load ptr, ptr %{}",
+                                rest, rest_ptr
+                            )
+                            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
                             // Push variant with the popped cell as data
                             writeln!(
