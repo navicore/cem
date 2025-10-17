@@ -313,6 +313,15 @@ impl CodeGen {
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
         writeln!(&mut self.output, "declare void @runtime_error(ptr)")
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output, "declare ptr @alloc_cell()")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+        // LLVM intrinsics
+        writeln!(
+            &mut self.output,
+            "declare void @llvm.memcpy.p0.p0.i64(ptr noalias nocapture writeonly, ptr noalias nocapture readonly, i64, i1 immarg)"
+        )
+        .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
         writeln!(&mut self.output).map_err(|e| CodegenError::InternalError(e.to_string()))?;
         Ok(())
@@ -791,12 +800,12 @@ impl CodeGen {
                 if let Some(&tag) = self.variant_tags.get(name) {
                     // This is a variant constructor - emit push_variant call
                     let field_count = self.variant_field_counts.get(name).copied().unwrap_or(0);
-                    let result = self.fresh_temp();
                     let dbg = self.dbg_annotation(loc);
 
                     match field_count {
                         0 => {
                             // Unit variant (no fields) - pass NULL as data
+                            let result = self.fresh_temp();
                             writeln!(
                                 &mut self.output,
                                 "  %{} = call ptr @push_variant(ptr %{}, i32 {}, ptr null){}",
@@ -806,19 +815,38 @@ impl CodeGen {
                             Ok(result)
                         }
                         1 => {
-                            // Single-field variant - pop the field value and use it as data
-                            // The field is on top of stack, we need to extract it as a pointer
-                            // For now, we'll use the stack cell itself as the data
-                            // This works because the data pointer will point to the whole StackCell
+                            // Single-field variant - we need to allocate a new cell for the field
+                            // and store that as the variant's data (the variant owns this cell)
 
-                            // Cast stack (which is a StackCell*) to void* for the data parameter
-                            let data_ptr = self.fresh_temp();
+                            // Allocate a new cell to store the field value
+                            let field_cell = self.fresh_temp();
                             writeln!(
                                 &mut self.output,
-                                "  %{} = bitcast ptr %{} to ptr",
-                                data_ptr, stack
+                                "  %{} = call ptr @alloc_cell(){}",
+                                field_cell, dbg
                             )
                             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                            // Copy the entire StackCell from top of stack to the new cell
+                            // StackCell is 32 bytes: { i32 tag, [4 x i8] padding, [16 x i8] union, ptr next }
+                            writeln!(
+                                &mut self.output,
+                                "  call void @llvm.memcpy.p0.p0.i64(ptr align 8 %{}, ptr align 8 %{}, i64 32, i1 false)",
+                                field_cell, stack
+                            )
+                            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                            // Clear the 'next' pointer in the copied cell (it's not part of a stack)
+                            let next_ptr = self.fresh_temp();
+                            writeln!(
+                                &mut self.output,
+                                "  %{} = getelementptr inbounds {{ i32, [4 x i8], [16 x i8], ptr }}, ptr %{}, i32 0, i32 3",
+                                next_ptr, field_cell
+                            )
+                            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                            writeln!(&mut self.output, "  store ptr null, ptr %{}", next_ptr)
+                                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
                             // Get rest of stack (pop the field)
                             let rest_ptr = self.fresh_temp();
@@ -837,11 +865,12 @@ impl CodeGen {
                             )
                             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
-                            // Push variant with the popped cell as data
+                            // Push variant with the allocated cell as data
+                            let result = self.fresh_temp();
                             writeln!(
                                 &mut self.output,
                                 "  %{} = call ptr @push_variant(ptr %{}, i32 {}, ptr %{}){}",
-                                result, rest, tag, data_ptr, dbg
+                                result, rest, tag, field_cell, dbg
                             )
                             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
                             Ok(result)
@@ -939,8 +968,9 @@ impl CodeGen {
                 }
 
                 // Generate labels for each branch and merge point
-                let merge_label = format!("match_merge_{}", self.temp_counter);
-                let default_label = format!("match_default_{}", self.temp_counter);
+                let match_id = self.temp_counter;
+                let merge_label = format!("match_merge_{}", match_id);
+                let default_label = format!("match_default_{}", match_id);
                 self.temp_counter += 1;
 
                 // Extract variant tag from stack top
@@ -983,6 +1013,25 @@ impl CodeGen {
                 )
                 .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
+                // Extract variant data pointer (for single-field variants)
+                // Variant data is at union offset 8 (after the 4-byte tag + 4-byte padding)
+                // We need this to unwrap the variant in branches
+                let variant_data_ptr = self.fresh_temp();
+                writeln!(
+                    &mut self.output,
+                    "  %{} = getelementptr inbounds {{ i32, [4 x i8], [16 x i8], ptr }}, ptr %{}, i32 0, i32 2, i32 8",
+                    variant_data_ptr, stack
+                )
+                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                let variant_data = self.fresh_temp();
+                writeln!(
+                    &mut self.output,
+                    "  %{} = load ptr, ptr %{}",
+                    variant_data, variant_data_ptr
+                )
+                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
                 // Generate switch statement
                 write!(
                     &mut self.output,
@@ -998,7 +1047,7 @@ impl CodeGen {
                     let tag_value = self.variant_tags.get(name).copied().ok_or_else(|| {
                         CodegenError::InternalError(format!("Unknown variant: {}", name))
                     })?;
-                    let case_label = format!("match_case_{}_{}", self.temp_counter - 1, idx);
+                    let case_label = format!("match_case_{}_{}", match_id, idx);
                     writeln!(
                         &mut self.output,
                         "\n    i32 {}, label %{}",
@@ -1015,14 +1064,48 @@ impl CodeGen {
                 let mut all_branches_musttail = true;
 
                 for (idx, branch) in branches.iter().enumerate() {
-                    let case_label = format!("match_case_{}_{}", self.temp_counter - 1, idx);
+                    let case_label = format!("match_case_{}_{}", match_id, idx);
 
                     writeln!(&mut self.output, "{}:", case_label)
                         .map_err(|e| CodegenError::InternalError(e.to_string()))?;
                     self.current_block = case_label.clone();
 
+                    // Determine the initial stack for this branch
+                    // For variants with data, we need to "unwrap" by linking data cell to rest
+                    let Pattern::Variant { name } = &branch.pattern;
+                    let field_count = self.variant_field_counts.get(name).copied().unwrap_or(0);
+
+                    let initial_stack = if field_count == 0 {
+                        // Unit variant (e.g., None) - no data, just use rest
+                        rest_var.clone()
+                    } else if field_count == 1 {
+                        // Single-field variant (e.g., Some(T)) - link data cell to rest
+                        // We need to set data->next = rest
+                        let data_next_ptr = self.fresh_temp();
+                        writeln!(
+                            &mut self.output,
+                            "  %{} = getelementptr inbounds {{ i32, [4 x i8], [16 x i8], ptr }}, ptr %{}, i32 0, i32 3",
+                            data_next_ptr, variant_data
+                        )
+                        .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                        writeln!(
+                            &mut self.output,
+                            "  store ptr %{}, ptr %{}",
+                            rest_var, data_next_ptr
+                        )
+                        .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                        variant_data.clone()
+                    } else {
+                        return Err(CodegenError::InternalError(format!(
+                            "Pattern matching on variant {} with {} fields not yet supported",
+                            name, field_count
+                        )));
+                    };
+
                     let (branch_stack, is_musttail) =
-                        self.compile_expr_sequence(&branch.body, &rest_var)?;
+                        self.compile_expr_sequence(&branch.body, &initial_stack)?;
 
                     let predecessor = self.current_block.clone();
 

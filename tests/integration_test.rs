@@ -841,3 +841,121 @@ fn test_pattern_match_codegen() {
 
     println!("✅ Pattern matching codegen test passed!");
 }
+
+#[test]
+fn test_variant_construction_with_field() {
+    ensure_runtime_built();
+
+    // Create a simple Option type:
+    // type Option<T> = Some(T) | None
+    let option_typedef = TypeDef {
+        name: "Option".to_string(),
+        type_params: vec!["T".to_string()],
+        variants: vec![
+            Variant {
+                name: "Some".to_string(),
+                fields: vec![Type::Var("T".to_string())],
+            },
+            Variant {
+                name: "None".to_string(),
+                fields: vec![],
+            },
+        ],
+    };
+
+    // Create a word that constructs Some(42) and extracts the value:
+    // : test-some ( -- Int )
+    //   42 Some     ; Construct Some(42)
+    //   match
+    //     Some => [ ]    ; Unwrap to get 42
+    //     None => [ 0 ]  ; Should never reach here
+    //   end ;
+    let word = WordDef {
+        name: "test_some".to_string(),
+        effect: Effect {
+            inputs: StackType::Empty,
+            outputs: StackType::Empty.push(Type::Int),
+        },
+        body: vec![
+            Expr::IntLit(42, SourceLoc::unknown()), // Push 42
+            Expr::WordCall("Some".to_string(), SourceLoc::unknown()), // Construct Some(42)
+            Expr::Match {
+                branches: vec![
+                    MatchBranch {
+                        pattern: Pattern::Variant {
+                            name: "Some".to_string(),
+                        },
+                        body: vec![], // Unwraps to Int (42)
+                    },
+                    MatchBranch {
+                        pattern: Pattern::Variant {
+                            name: "None".to_string(),
+                        },
+                        body: vec![Expr::IntLit(0, SourceLoc::unknown())], // Should never execute
+                    },
+                ],
+                loc: SourceLoc::unknown(),
+            },
+        ],
+        loc: SourceLoc::unknown(),
+    };
+
+    let program = Program {
+        type_defs: vec![option_typedef],
+        word_defs: vec![word],
+    };
+
+    // Generate IR
+    let mut codegen = CodeGen::new();
+    let ir = codegen
+        .compile_program_with_main(&program, Some("test_some"))
+        .expect("Failed to generate IR");
+
+    // Save IR for debugging
+    std::fs::create_dir_all("target").ok();
+    std::fs::write("target/test_variant_construction.ll", &ir).expect("Failed to write IR");
+
+    // Verify IR contains variant construction:
+
+    // 1. Should allocate cell for variant field data
+    assert!(
+        ir.contains("call ptr @alloc_cell()"),
+        "IR should allocate cell for variant field"
+    );
+
+    // 2. Should use memcpy to copy field value
+    assert!(
+        ir.contains("@llvm.memcpy"),
+        "IR should use memcpy to copy field value"
+    );
+
+    // 3. Should call push_variant
+    assert!(
+        ir.contains("call ptr @push_variant"),
+        "IR should call push_variant"
+    );
+
+    // 4. Compile and link to verify it works
+    link_program(
+        &ir,
+        "runtime/libcem_runtime.a",
+        "test_variant_construction_exe",
+    )
+    .expect("Failed to link");
+
+    // 5. Run the program - it should execute without errors
+    let output = Command::new("./test_variant_construction_exe")
+        .output()
+        .expect("Failed to run executable");
+
+    // Check it ran successfully (exit code 0)
+    // The unwrapped value (42) is on the final stack but not used as exit code
+    assert!(output.status.success(), "Program should run successfully");
+
+    // Clean up
+    std::fs::remove_file("test_variant_construction_exe").ok();
+    std::fs::remove_file("test_variant_construction_exe.ll").ok();
+    // Keep target/test_variant_construction.ll for inspection
+
+    println!("✅ Variant construction with field test passed!");
+}

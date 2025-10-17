@@ -38,7 +38,12 @@ void free_cell(StackCell *cell) {
   if (cell->tag == TAG_STRING && cell->value.s) {
     free(cell->value.s);
   }
-  // TODO: Free variant data when implemented
+
+  // Free variant data (which is a heap-allocated StackCell for single-field
+  // variants)
+  if (cell->tag == TAG_VARIANT && cell->value.variant.data) {
+    free_cell((StackCell *)cell->value.variant.data);
+  }
 
   free(cell);
 }
@@ -136,9 +141,53 @@ StackCell *stack_dup(StackCell *stack) {
     new_cell->value.quotation = stack->value.quotation;
     break;
   case TAG_VARIANT:
-    // TODO: Implement variant copying
-    free_cell(new_cell);
-    runtime_error("dup: variant copying not yet implemented");
+    // Copy variant tag
+    new_cell->value.variant.tag = stack->value.variant.tag;
+
+    // Deep copy variant data (which is a StackCell* for single-field variants)
+    if (stack->value.variant.data) {
+      // Recursively duplicate the data cell
+      StackCell *original_data = (StackCell *)stack->value.variant.data;
+      StackCell *copied_data = alloc_cell();
+      copied_data->tag = original_data->tag;
+
+      // Copy the value based on its tag
+      switch (original_data->tag) {
+      case TAG_INT:
+        copied_data->value.i = original_data->value.i;
+        break;
+      case TAG_BOOL:
+        copied_data->value.b = original_data->value.b;
+        break;
+      case TAG_STRING:
+        if (original_data->value.s) {
+          copied_data->value.s = strdup(original_data->value.s);
+          if (!copied_data->value.s) {
+            free_cell(copied_data);
+            free_cell(new_cell);
+            runtime_error("dup: out of memory copying variant data string");
+          }
+        } else {
+          copied_data->value.s = NULL;
+        }
+        break;
+      case TAG_QUOTATION:
+        copied_data->value.quotation = original_data->value.quotation;
+        break;
+      case TAG_VARIANT:
+        // Nested variants not yet supported
+        free_cell(copied_data);
+        free_cell(new_cell);
+        runtime_error("dup: nested variant copying not yet supported");
+        break;
+      }
+
+      copied_data->next = NULL;
+      new_cell->value.variant.data = copied_data;
+    } else {
+      // Unit variant (no data)
+      new_cell->value.variant.data = NULL;
+    }
     break;
   }
 
