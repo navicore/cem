@@ -2,7 +2,7 @@ use cemc::ast::types::{Effect, StackType, Type};
 /**
 End-to-end integration test: Cem source → LLVM IR → executable
 */
-use cemc::ast::{Expr, Program, SourceLoc, WordDef};
+use cemc::ast::{Expr, MatchBranch, Pattern, Program, SourceLoc, TypeDef, Variant, WordDef};
 use cemc::codegen::{CodeGen, compile_to_object, link_program};
 use std::process::Command;
 use std::sync::Once;
@@ -720,4 +720,124 @@ fn test_debug_metadata_filename_escaping() {
         ir.contains(r#"!DIFile(filename: "test\"file.cem""#),
         "Filename with quotes should be escaped"
     );
+}
+
+#[test]
+fn test_pattern_match_codegen() {
+    ensure_runtime_built();
+
+    // Create a simple Option type:
+    // type Option<T> = Some(T) | None
+    let option_typedef = TypeDef {
+        name: "Option".to_string(),
+        type_params: vec!["T".to_string()],
+        variants: vec![
+            Variant {
+                name: "Some".to_string(),
+                fields: vec![Type::Var("T".to_string())],
+            },
+            Variant {
+                name: "None".to_string(),
+                fields: vec![],
+            },
+        ],
+    };
+
+    // Create a word that pattern matches on Option:
+    // : handle-option ( Option(Int) -- Int )
+    //   match
+    //     Some => [ ]      ; unwraps to Int
+    //     None => [ 0 ]    ; returns 0
+    //   end ;
+    let word = WordDef {
+        name: "handle_option".to_string(),
+        effect: Effect {
+            inputs: StackType::Empty.push(Type::Named {
+                name: "Option".to_string(),
+                args: vec![Type::Int],
+            }),
+            outputs: StackType::Empty.push(Type::Int),
+        },
+        body: vec![Expr::Match {
+            branches: vec![
+                MatchBranch {
+                    pattern: Pattern::Variant {
+                        name: "Some".to_string(),
+                    },
+                    body: vec![], // Just unwraps the Int from Some
+                },
+                MatchBranch {
+                    pattern: Pattern::Variant {
+                        name: "None".to_string(),
+                    },
+                    body: vec![Expr::IntLit(0, SourceLoc::unknown())], // Push 0
+                },
+            ],
+            loc: SourceLoc::unknown(),
+        }],
+        loc: SourceLoc::unknown(),
+    };
+
+    let program = Program {
+        type_defs: vec![option_typedef],
+        word_defs: vec![word],
+    };
+
+    // Generate IR
+    let mut codegen = CodeGen::new();
+    let ir = codegen
+        .compile_program(&program)
+        .expect("Failed to generate IR");
+
+    // Save IR for debugging
+    std::fs::create_dir_all("target").ok();
+    std::fs::write("target/test_pattern_match.ll", &ir).expect("Failed to write IR");
+
+    // Verify IR contains expected pattern match elements:
+
+    // 1. Should have switch statement for pattern matching
+    assert!(
+        ir.contains("switch i32"),
+        "IR should contain switch statement for pattern matching"
+    );
+
+    // 2. Should have case labels for each variant
+    assert!(
+        ir.contains("match_case_"),
+        "IR should contain match case labels"
+    );
+
+    // 3. Should have default label (for exhaustiveness error)
+    assert!(
+        ir.contains("match_default_"),
+        "IR should contain default case label"
+    );
+
+    // 4. Should call runtime_error for non-exhaustive match (unreachable)
+    assert!(
+        ir.contains("call void @runtime_error"),
+        "IR should have runtime_error call for default case"
+    );
+
+    // 5. Should have merge label (or musttail returns)
+    assert!(
+        ir.contains("match_merge_") || ir.contains("ret ptr"),
+        "IR should have merge point or returns"
+    );
+
+    // 6. Should extract variant tag from stack cell
+    assert!(
+        ir.contains("getelementptr inbounds"),
+        "IR should extract variant tag using GEP"
+    );
+
+    // 7. Verify IR compiles to object code
+    compile_to_object(&ir, "test_pattern_match").expect("Failed to compile IR");
+
+    // Clean up
+    std::fs::remove_file("test_pattern_match.o").ok();
+    std::fs::remove_file("test_pattern_match.ll").ok();
+    // Keep target/test_pattern_match.ll for inspection
+
+    println!("✅ Pattern matching codegen test passed!");
 }

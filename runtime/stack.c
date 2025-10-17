@@ -500,6 +500,15 @@ StackCell *push_quotation(StackCell *stack, void *func_ptr) {
   return cell;
 }
 
+StackCell *push_variant(StackCell *stack, uint32_t tag, void *data) {
+  StackCell *cell = alloc_cell();
+  cell->tag = TAG_VARIANT;
+  cell->value.variant.tag = tag;
+  cell->value.variant.data = data;
+  cell->next = stack;
+  return cell;
+}
+
 // ============================================================================
 // String Operations
 // ============================================================================
