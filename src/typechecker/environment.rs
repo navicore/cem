@@ -49,6 +49,9 @@ impl Environment {
 
     /// Add a type definition and automatically create variant constructor words
     pub fn add_type(&mut self, typedef: TypeDef) {
+        // Note: Validation of variant features (multi-field, nested) happens at codegen time
+        // This allows defining types that aren't fully supported yet, as long as they're not used
+
         // For each variant, create a constructor word
         // Example: type Option<T> = Some(T) | None
         // Creates:
@@ -78,6 +81,10 @@ impl Environment {
             // Build the effect signature
             // Input stack: variant fields (if any)
             // Output stack: the ADT type
+            //
+            // Note: .rev() is used because stack types are built right-to-left
+            // For Some(T), we want: ( T -- Option(T) )
+            // Without .rev(), we'd get the fields in wrong order for multi-field variants
             let effect = Effect {
                 inputs: variant
                     .fields

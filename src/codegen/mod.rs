@@ -959,6 +959,13 @@ impl CodeGen {
 
             Expr::Match { branches, loc: _ } => {
                 // Pattern matching on variants
+                //
+                // Ownership semantics:
+                // - The variant cell is consumed (popped from stack)
+                // - For unit variants (None): rest of stack becomes initial stack for branch
+                // - For single-field variants (Some(T)): field data is unwrapped onto stack
+                //   by linking the data cell to rest of stack
+                //
                 // Strategy: extract variant tag, switch on tag, each case executes branch body
 
                 if branches.is_empty() {
