@@ -163,7 +163,11 @@ StackCell *stack_dup(StackCell *stack) {
         if (original_data->value.s) {
           copied_data->value.s = strdup(original_data->value.s);
           if (!copied_data->value.s) {
+            // strdup failed - clean up allocated cells
             free_cell(copied_data);
+            // Null out the data pointer to avoid double-free when freeing
+            // new_cell
+            new_cell->value.variant.data = NULL;
             free_cell(new_cell);
             runtime_error("dup: out of memory copying variant data string");
           }
@@ -177,6 +181,8 @@ StackCell *stack_dup(StackCell *stack) {
       case TAG_VARIANT:
         // Nested variants not yet supported
         free_cell(copied_data);
+        // Null out the data pointer to avoid double-free when freeing new_cell
+        new_cell->value.variant.data = NULL;
         free_cell(new_cell);
         runtime_error("dup: nested variant copying not yet supported");
         break;
