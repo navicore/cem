@@ -3,7 +3,7 @@ Type checking environment for Cem
 
 Maintains symbol tables for words, types, and type variables during type checking.
 */
-use crate::ast::types::{Effect, Type};
+use crate::ast::types::{Effect, StackType, Type};
 use crate::ast::{TypeDef, Variant};
 use std::collections::HashMap;
 
@@ -47,8 +47,58 @@ impl Environment {
         self.words.get(name)
     }
 
-    /// Add a type definition
+    /// Add a type definition and automatically create variant constructor words
     pub fn add_type(&mut self, typedef: TypeDef) {
+        // Note: Validation of variant features (multi-field, nested) happens at codegen time
+        // This allows defining types that aren't fully supported yet, as long as they're not used
+
+        // For each variant, create a constructor word
+        // Example: type Option<T> = Some(T) | None
+        // Creates:
+        //   Some : ( T -- Option(T) )
+        //   None : ( -- Option(T) )
+
+        for variant in &typedef.variants {
+            // Build the result type (the ADT with type parameters)
+            let result_type = if typedef.type_params.is_empty() {
+                // Non-generic type: Option => Option
+                Type::Named {
+                    name: typedef.name.clone(),
+                    args: vec![],
+                }
+            } else {
+                // Generic type: Option<T> => Option(T)
+                Type::Named {
+                    name: typedef.name.clone(),
+                    args: typedef
+                        .type_params
+                        .iter()
+                        .map(|p| Type::Var(p.clone()))
+                        .collect(),
+                }
+            };
+
+            // Build the effect signature
+            // Input stack: variant fields (if any)
+            // Output stack: the ADT type
+            //
+            // Note: .rev() is used because stack types are built right-to-left
+            // For Some(T), we want: ( T -- Option(T) )
+            // Without .rev(), we'd get the fields in wrong order for multi-field variants
+            let effect = Effect {
+                inputs: variant
+                    .fields
+                    .iter()
+                    .rev()
+                    .fold(StackType::Empty, |stack, field| stack.push(field.clone())),
+                outputs: StackType::Empty.push(result_type),
+            };
+
+            // Register the variant constructor as a word
+            self.add_word(variant.name.clone(), effect);
+        }
+
+        // Store the type definition
         self.types.insert(typedef.name.clone(), typedef);
     }
 

@@ -196,6 +196,15 @@ StackCell *push_string(StackCell *stack, const char *value);
  */
 StackCell *push_quotation(StackCell *stack, void *func_ptr);
 
+/**
+ * push_variant ( -- Variant )
+ * Push a variant (ADT value) onto the stack
+ * @param stack Current stack
+ * @param tag Variant tag (constructor index)
+ * @param data Variant data pointer (can be NULL for unit variants)
+ */
+StackCell *push_variant(StackCell *stack, uint32_t tag, void *data);
+
 // ============================================================================
 // String Operations
 // ============================================================================

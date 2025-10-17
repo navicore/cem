@@ -36,7 +36,7 @@ pub use linker::{compile_to_object, link_program};
 
 #[cfg(test)]
 use crate::ast::SourceLoc;
-use crate::ast::{Expr, Program, WordDef};
+use crate::ast::{Expr, Pattern, Program, WordDef};
 use std::fmt::Write as _;
 use std::process::Command;
 
@@ -54,6 +54,8 @@ pub struct CodeGen {
     current_subprogram_id: Option<usize>, // ID of the current function's DISubprogram
     debug_locations: std::collections::HashMap<(usize, usize, usize, usize), usize>, // (file_id, line, col, scope) -> DILocation ID
     string_constants: std::collections::HashMap<String, String>, // string content -> global name (@.str.N)
+    variant_tags: std::collections::HashMap<String, u32>, // variant_name -> tag (index in type definition)
+    variant_field_counts: std::collections::HashMap<String, usize>, // variant_name -> number of fields
 }
 
 impl CodeGen {
@@ -72,6 +74,8 @@ impl CodeGen {
             current_subprogram_id: None,
             debug_locations: std::collections::HashMap::new(),
             string_constants: std::collections::HashMap::new(),
+            variant_tags: std::collections::HashMap::new(),
+            variant_field_counts: std::collections::HashMap::new(),
         }
     }
 
@@ -156,6 +160,16 @@ impl CodeGen {
 
         // Declare runtime functions
         self.emit_runtime_declarations()?;
+
+        // Build variant tag map and field count map from type definitions
+        // Each variant gets a u32 tag corresponding to its index in the type's variant list
+        for typedef in &program.type_defs {
+            for (idx, variant) in typedef.variants.iter().enumerate() {
+                self.variant_tags.insert(variant.name.clone(), idx as u32);
+                self.variant_field_counts
+                    .insert(variant.name.clone(), variant.fields.len());
+            }
+        }
 
         // Collect all unique source files from the program
         let mut source_files = std::collections::HashSet::new();
@@ -247,6 +261,8 @@ impl CodeGen {
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
         writeln!(&mut self.output, "declare ptr @push_quotation(ptr, ptr)")
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output, "declare ptr @push_variant(ptr, i32, ptr)")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
         // Control flow operations
         writeln!(&mut self.output, "declare ptr @call_quotation(ptr)")
@@ -295,6 +311,17 @@ impl CodeGen {
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
         writeln!(&mut self.output, "declare void @free_stack(ptr)")
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output, "declare void @runtime_error(ptr)")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+        writeln!(&mut self.output, "declare ptr @alloc_cell()")
+            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+        // LLVM intrinsics
+        writeln!(
+            &mut self.output,
+            "declare void @llvm.memcpy.p0.p0.i64(ptr noalias nocapture writeonly, ptr noalias nocapture readonly, i64, i1 immarg)"
+        )
+        .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
         writeln!(&mut self.output).map_err(|e| CodegenError::InternalError(e.to_string()))?;
         Ok(())
@@ -573,11 +600,12 @@ impl CodeGen {
         // Set current subprogram for debug location generation
         self.current_subprogram_id = Some(subprogram_id);
 
-        // Avoid name collision with C main() - prefix Cem "main" word with "cem_"
+        // Map word name to function name (handles operators and hyphenated names)
+        // Also avoid name collision with C main() - prefix Cem "main" word with "cem_"
         let function_name = if word.name == "main" {
             "cem_main".to_string()
         } else {
-            word.name.clone()
+            Self::map_operator_to_function(&word.name)
         };
 
         // Emit function definition with debug metadata attachment
@@ -623,33 +651,41 @@ impl CodeGen {
         initial_stack: &str,
     ) -> CodegenResult<(String, bool)> {
         match quot {
-            Expr::Quotation(exprs, _loc) => {
-                let mut stack_var = initial_stack.to_string();
-                let len = exprs.len();
-
-                // Empty quotations don't end with musttail
-                if len == 0 {
-                    return Ok((stack_var, false));
-                }
-
-                let mut ends_with_musttail = false;
-
-                for (i, expr) in exprs.iter().enumerate() {
-                    let is_tail = i == len - 1; // Track tail position in branch
-                    stack_var = self.compile_expr_with_context(expr, &stack_var, is_tail)?;
-
-                    // Check if the last expression is a WordCall in tail position
-                    // (which compile_expr_with_context will compile as a musttail call)
-                    if is_tail && let Expr::WordCall(_, _) = expr {
-                        ends_with_musttail = true;
-                    }
-                }
-                Ok((stack_var, ends_with_musttail))
-            }
+            Expr::Quotation(exprs, _loc) => self.compile_expr_sequence(exprs, initial_stack),
             _ => Err(CodegenError::InternalError(
                 "If branches must be quotations".to_string(),
             )),
         }
+    }
+
+    /// Compile a sequence of expressions (used for quotations and match branches)
+    /// Returns (final_stack_var, ends_with_musttail)
+    fn compile_expr_sequence(
+        &mut self,
+        exprs: &[Expr],
+        initial_stack: &str,
+    ) -> CodegenResult<(String, bool)> {
+        let mut stack_var = initial_stack.to_string();
+        let len = exprs.len();
+
+        // Empty sequences don't end with musttail
+        if len == 0 {
+            return Ok((stack_var, false));
+        }
+
+        let mut ends_with_musttail = false;
+
+        for (i, expr) in exprs.iter().enumerate() {
+            let is_tail = i == len - 1; // Track tail position in branch
+            stack_var = self.compile_expr_with_context(expr, &stack_var, is_tail)?;
+
+            // Check if the last expression is a WordCall in tail position
+            // (which compile_expr_with_context will compile as a musttail call)
+            if is_tail && let Expr::WordCall(_, _) = expr {
+                ends_with_musttail = true;
+            }
+        }
+        Ok((stack_var, ends_with_musttail))
     }
 
     /// Compile a single expression with tail-call context
@@ -760,16 +796,106 @@ impl CodeGen {
             }
 
             Expr::WordCall(name, loc) => {
-                let result = self.fresh_temp();
-                let dbg = self.dbg_annotation(loc);
-                let func_name = Self::map_operator_to_function(name);
-                writeln!(
-                    &mut self.output,
-                    "  %{} = call ptr @{}(ptr %{}){}",
-                    result, func_name, stack, dbg
-                )
-                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
-                Ok(result)
+                // Check if this is a variant constructor
+                if let Some(&tag) = self.variant_tags.get(name) {
+                    // This is a variant constructor - emit push_variant call
+                    let field_count = self.variant_field_counts.get(name).copied().unwrap_or(0);
+                    let dbg = self.dbg_annotation(loc);
+
+                    match field_count {
+                        0 => {
+                            // Unit variant (no fields) - pass NULL as data
+                            let result = self.fresh_temp();
+                            writeln!(
+                                &mut self.output,
+                                "  %{} = call ptr @push_variant(ptr %{}, i32 {}, ptr null){}",
+                                result, stack, tag, dbg
+                            )
+                            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                            Ok(result)
+                        }
+                        1 => {
+                            // Single-field variant - we need to allocate a new cell for the field
+                            // and store that as the variant's data (the variant owns this cell)
+
+                            // Allocate a new cell to store the field value
+                            let field_cell = self.fresh_temp();
+                            writeln!(
+                                &mut self.output,
+                                "  %{} = call ptr @alloc_cell(){}",
+                                field_cell, dbg
+                            )
+                            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                            // Copy the entire StackCell from top of stack to the new cell
+                            // StackCell is 32 bytes: { i32 tag, [4 x i8] padding, [16 x i8] union, ptr next }
+                            writeln!(
+                                &mut self.output,
+                                "  call void @llvm.memcpy.p0.p0.i64(ptr align 8 %{}, ptr align 8 %{}, i64 32, i1 false)",
+                                field_cell, stack
+                            )
+                            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                            // Clear the 'next' pointer in the copied cell (it's not part of a stack)
+                            let next_ptr = self.fresh_temp();
+                            writeln!(
+                                &mut self.output,
+                                "  %{} = getelementptr inbounds {{ i32, [4 x i8], [16 x i8], ptr }}, ptr %{}, i32 0, i32 3",
+                                next_ptr, field_cell
+                            )
+                            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                            writeln!(&mut self.output, "  store ptr null, ptr %{}", next_ptr)
+                                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                            // Get rest of stack (pop the field)
+                            let rest_ptr = self.fresh_temp();
+                            writeln!(
+                                &mut self.output,
+                                "  %{} = getelementptr inbounds {{ i32, [4 x i8], [16 x i8], ptr }}, ptr %{}, i32 0, i32 3",
+                                rest_ptr, stack
+                            )
+                            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                            let rest = self.fresh_temp();
+                            writeln!(
+                                &mut self.output,
+                                "  %{} = load ptr, ptr %{}",
+                                rest, rest_ptr
+                            )
+                            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                            // Push variant with the allocated cell as data
+                            let result = self.fresh_temp();
+                            writeln!(
+                                &mut self.output,
+                                "  %{} = call ptr @push_variant(ptr %{}, i32 {}, ptr %{}){}",
+                                result, rest, tag, field_cell, dbg
+                            )
+                            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                            Ok(result)
+                        }
+                        _ => {
+                            // Multi-field variants not yet supported
+                            Err(CodegenError::InternalError(format!(
+                                "Variant constructor {} with {} fields not yet supported (only 0 or 1 fields)",
+                                name, field_count
+                            )))
+                        }
+                    }
+                } else {
+                    // Regular word call
+                    let result = self.fresh_temp();
+                    let dbg = self.dbg_annotation(loc);
+                    let func_name = Self::map_operator_to_function(name);
+                    writeln!(
+                        &mut self.output,
+                        "  %{} = call ptr @{}(ptr %{}){}",
+                        result, func_name, stack, dbg
+                    )
+                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                    Ok(result)
+                }
             }
 
             Expr::Quotation(exprs, _loc) => {
@@ -831,9 +957,227 @@ impl CodeGen {
                 Ok(result)
             }
 
-            Expr::Match { .. } => Err(CodegenError::Unimplemented {
-                feature: "pattern matching".to_string(),
-            }),
+            Expr::Match { branches, loc: _ } => {
+                // Pattern matching on variants
+                //
+                // Ownership semantics:
+                // - The variant cell is consumed (popped from stack)
+                // - For unit variants (None): rest of stack becomes initial stack for branch
+                // - For single-field variants (Some(T)): field data is unwrapped onto stack
+                //   by linking the data cell to rest of stack
+                //
+                // Strategy: extract variant tag, switch on tag, each case executes branch body
+
+                if branches.is_empty() {
+                    return Err(CodegenError::InternalError(
+                        "Empty match expression".to_string(),
+                    ));
+                }
+
+                // Generate labels for each branch and merge point
+                let match_id = self.temp_counter;
+                let merge_label = format!("match_merge_{}", match_id);
+                let default_label = format!("match_default_{}", match_id);
+                self.temp_counter += 1;
+
+                // Extract variant tag from stack top
+                // StackCell layout: { i32 tag, [4 x i8] padding, [16 x i8] union, ptr next }
+                // Variant is stored in union as: { i32 variant_tag, ptr variant_data }
+                // So variant_tag is at union offset 0 (field 2, index 0-3)
+
+                // Get pointer to variant tag within the union
+                let variant_tag_ptr = self.fresh_temp();
+                writeln!(
+                    &mut self.output,
+                    "  %{} = getelementptr inbounds {{ i32, [4 x i8], [16 x i8], ptr }}, ptr %{}, i32 0, i32 2, i32 0",
+                    variant_tag_ptr, stack
+                )
+                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                // Load variant tag as i32 (first 4 bytes of union)
+                let variant_tag = self.fresh_temp();
+                writeln!(
+                    &mut self.output,
+                    "  %{} = load i32, ptr %{}",
+                    variant_tag, variant_tag_ptr
+                )
+                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                // Get rest of stack (next pointer at field index 3)
+                let rest_ptr = self.fresh_temp();
+                writeln!(
+                    &mut self.output,
+                    "  %{} = getelementptr inbounds {{ i32, [4 x i8], [16 x i8], ptr }}, ptr %{}, i32 0, i32 3",
+                    rest_ptr, stack
+                )
+                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                let rest_var = self.fresh_temp();
+                writeln!(
+                    &mut self.output,
+                    "  %{} = load ptr, ptr %{}",
+                    rest_var, rest_ptr
+                )
+                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                // Extract variant data pointer (for single-field variants)
+                // Variant data is at union offset 8 (after the 4-byte tag + 4-byte padding)
+                // We need this to unwrap the variant in branches
+                let variant_data_ptr = self.fresh_temp();
+                writeln!(
+                    &mut self.output,
+                    "  %{} = getelementptr inbounds {{ i32, [4 x i8], [16 x i8], ptr }}, ptr %{}, i32 0, i32 2, i32 8",
+                    variant_data_ptr, stack
+                )
+                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                let variant_data = self.fresh_temp();
+                writeln!(
+                    &mut self.output,
+                    "  %{} = load ptr, ptr %{}",
+                    variant_data, variant_data_ptr
+                )
+                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                // Generate switch statement
+                write!(
+                    &mut self.output,
+                    "  switch i32 %{}, label %{} [",
+                    variant_tag, default_label
+                )
+                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                // Add switch cases for each branch
+                for (idx, branch) in branches.iter().enumerate() {
+                    let Pattern::Variant { name } = &branch.pattern;
+                    // Look up variant tag from type environment
+                    let tag_value = self.variant_tags.get(name).copied().ok_or_else(|| {
+                        CodegenError::InternalError(format!("Unknown variant: {}", name))
+                    })?;
+                    let case_label = format!("match_case_{}_{}", match_id, idx);
+                    writeln!(
+                        &mut self.output,
+                        "\n    i32 {}, label %{}",
+                        tag_value, case_label
+                    )
+                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                }
+                writeln!(&mut self.output, "  ]")
+                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                // Generate code for each branch
+                let mut branch_results = Vec::new();
+                let mut branch_predecessors = Vec::new();
+                let mut all_branches_musttail = true;
+
+                for (idx, branch) in branches.iter().enumerate() {
+                    let case_label = format!("match_case_{}_{}", match_id, idx);
+
+                    writeln!(&mut self.output, "{}:", case_label)
+                        .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                    self.current_block = case_label.clone();
+
+                    // Determine the initial stack for this branch
+                    // For variants with data, we need to "unwrap" by linking data cell to rest
+                    let Pattern::Variant { name } = &branch.pattern;
+                    let field_count = self.variant_field_counts.get(name).copied().unwrap_or(0);
+
+                    let initial_stack = if field_count == 0 {
+                        // Unit variant (e.g., None) - no data, just use rest
+                        rest_var.clone()
+                    } else if field_count == 1 {
+                        // Single-field variant (e.g., Some(T)) - link data cell to rest
+                        // We need to set data->next = rest
+                        let data_next_ptr = self.fresh_temp();
+                        writeln!(
+                            &mut self.output,
+                            "  %{} = getelementptr inbounds {{ i32, [4 x i8], [16 x i8], ptr }}, ptr %{}, i32 0, i32 3",
+                            data_next_ptr, variant_data
+                        )
+                        .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                        writeln!(
+                            &mut self.output,
+                            "  store ptr %{}, ptr %{}",
+                            rest_var, data_next_ptr
+                        )
+                        .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                        variant_data.clone()
+                    } else {
+                        return Err(CodegenError::InternalError(format!(
+                            "Pattern matching on variant {} with {} fields not yet supported",
+                            name, field_count
+                        )));
+                    };
+
+                    let (branch_stack, is_musttail) =
+                        self.compile_expr_sequence(&branch.body, &initial_stack)?;
+
+                    let predecessor = self.current_block.clone();
+
+                    if is_musttail {
+                        writeln!(&mut self.output, "  ret ptr %{}", branch_stack)
+                            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                    } else {
+                        all_branches_musttail = false;
+                        writeln!(&mut self.output, "  br label %{}", merge_label)
+                            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                        branch_results.push(branch_stack);
+                        branch_predecessors.push(predecessor);
+                    }
+                }
+
+                // Default case (should never be reached if match is exhaustive)
+                writeln!(&mut self.output, "{}:", default_label)
+                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                writeln!(
+                    &mut self.output,
+                    "  call void @runtime_error(ptr @.str.match_error)"
+                )
+                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                writeln!(&mut self.output, "  unreachable")
+                    .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                // Add error string to string globals if not already present
+                if !self.string_constants.contains_key("match_error") {
+                    let error_msg = "match: non-exhaustive pattern (internal error)";
+                    let escaped = Self::escape_llvm_string(error_msg);
+                    let str_len = error_msg.len() + 1;
+                    let global_decl = format!(
+                        "@.str.match_error = private unnamed_addr constant [{} x i8] c\"{}\\00\"\n",
+                        str_len, escaped
+                    );
+                    self.string_globals.push_str(&global_decl);
+                }
+
+                // Merge point
+                if !all_branches_musttail {
+                    writeln!(&mut self.output, "{}:", merge_label)
+                        .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                    self.current_block = merge_label;
+
+                    // Build phi node from branches that didn't return
+                    let result = self.fresh_temp();
+                    write!(&mut self.output, "  %{} = phi ptr", result)
+                        .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                    for (stack_val, pred) in branch_results.iter().zip(branch_predecessors.iter()) {
+                        write!(&mut self.output, " [ %{}, %{} ],", stack_val, pred)
+                            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                    }
+                    // Remove trailing comma
+                    self.output.pop();
+                    writeln!(&mut self.output)
+                        .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+
+                    Ok(result)
+                } else {
+                    // All branches ended with musttail and return - no merge point needed
+                    // This is actually unreachable code after the match, so return a dummy value
+                    Ok(rest_var) // Won't be used since all branches returned
+                }
+            }
 
             Expr::If {
                 then_branch,

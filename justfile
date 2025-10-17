@@ -42,9 +42,9 @@ test-integration:
 check:
     cargo check
 
-# Run clippy linter
+# Run clippy linter (matches CI)
 lint:
-    cargo clippy -- -D warnings
+    cargo clippy --all-targets --all-features -- -D warnings
 
 # Format code
 fmt:
