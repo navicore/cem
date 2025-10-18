@@ -118,7 +118,7 @@ impl CodeGen {
             "+" => "add".to_string(),
             "-" => "subtract".to_string(),
             "*" => "multiply".to_string(),
-            "/" => "divide".to_string(),
+            "/" => "divide_op".to_string(),
             // Comparison operators
             "<" => "int_less".to_string(),
             ">" => "int_greater".to_string(),
@@ -234,7 +234,7 @@ impl CodeGen {
         }
 
         // Arithmetic (ptr -> ptr)
-        for func in &["add", "subtract", "multiply", "divide"] {
+        for func in &["add", "subtract", "multiply", "divide_op"] {
             writeln!(&mut self.output, "declare ptr @{}(ptr)", func)
                 .map_err(|e| CodegenError::InternalError(e.to_string()))?;
         }
@@ -618,18 +618,22 @@ impl CodeGen {
         writeln!(&mut self.output, "entry:")
             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
-        let mut stack_var = "stack".to_string();
+        // Compile all expressions in the word body
+        let (final_stack, ends_with_musttail) =
+            self.compile_expr_sequence(&word.body, "stack")?;
 
-        // Compile all expressions except possibly the last
-        let body_len = word.body.len();
-        for (i, expr) in word.body.iter().enumerate() {
-            let is_tail = i == body_len - 1;
-            stack_var = self.compile_expr_with_context(expr, &stack_var, is_tail)?;
+        // Check if all paths have already terminated (match/if with all branches returning)
+        // This is the OPPOSITE of check_all_paths_returned:
+        //   check_all_paths_returned returns true if caller SHOULD emit ret (WordCall case)
+        //   We want to know if all paths ALREADY emitted ret (Match/If case)
+        let all_paths_already_terminated = word.body.last()
+            .map_or(false, |e| self.check_all_branches_already_returned(e));
+
+        // Emit ret unless all paths have already emitted ret
+        if !all_paths_already_terminated {
+            writeln!(&mut self.output, "  ret ptr %{}", final_stack)
+                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
         }
-
-        // Return final stack
-        writeln!(&mut self.output, "  ret ptr %{}", stack_var)
-            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
 
         writeln!(&mut self.output, "}}").map_err(|e| CodegenError::InternalError(e.to_string()))?;
         writeln!(&mut self.output).map_err(|e| CodegenError::InternalError(e.to_string()))?;
@@ -638,6 +642,76 @@ impl CodeGen {
         self.current_subprogram_id = None;
 
         Ok(())
+    }
+
+    /// Check if an expression will have all code paths return (needs caller to emit ret)
+    /// Returns true if the expression needs the caller to emit ret (WordCall)
+    /// or if all branches end with expressions that need ret (Match/If with all branches returning)
+    fn check_all_paths_returned(&self, expr: &Expr) -> bool {
+        match expr {
+            // A word call (non-variant) in tail position will be compiled as musttail
+            // The parent context (match branch or word body) will emit the ret statement
+            Expr::WordCall(name, _) => !self.variant_tags.contains_key(name),
+
+            // Match emits ret for each branch if all branches end with musttail
+            Expr::Match { branches, .. } => {
+                branches.iter().all(|b| {
+                    b.body.last().map_or(false, |e| self.check_all_paths_returned(e))
+                })
+            }
+
+            // If emits ret for both branches if both end with musttail
+            Expr::If { then_branch, else_branch, .. } => {
+                let then_musttail = if let Expr::Quotation(exprs, _) = &**then_branch {
+                    exprs.last().map_or(false, |e| self.check_all_paths_returned(e))
+                } else {
+                    false
+                };
+                let else_musttail = if let Expr::Quotation(exprs, _) = &**else_branch {
+                    exprs.last().map_or(false, |e| self.check_all_paths_returned(e))
+                } else {
+                    false
+                };
+                then_musttail && else_musttail
+            }
+
+            _ => false,
+        }
+    }
+
+    /// Check if all branches of a Match/If have already emitted ret
+    /// This is different from check_all_paths_returned:
+    ///   - WordCall: false (needs ret to be emitted)
+    ///   - Match with all branches WordCall: true (all branches already emitted ret)
+    fn check_all_branches_already_returned(&self, expr: &Expr) -> bool {
+        match expr {
+            // WordCall needs ret to be emitted, hasn't already returned
+            Expr::WordCall(_, _) => false,
+
+            // Match has all branches returned if all end with expressions that return
+            Expr::Match { branches, .. } => {
+                branches.iter().all(|b| {
+                    b.body.last().map_or(false, |e| self.check_all_paths_returned(e))
+                })
+            }
+
+            // If has all branches returned if both end with expressions that return
+            Expr::If { then_branch, else_branch, .. } => {
+                let then_returned = if let Expr::Quotation(exprs, _) = &**then_branch {
+                    exprs.last().map_or(false, |e| self.check_all_paths_returned(e))
+                } else {
+                    false
+                };
+                let else_returned = if let Expr::Quotation(exprs, _) = &**else_branch {
+                    exprs.last().map_or(false, |e| self.check_all_paths_returned(e))
+                } else {
+                    false
+                };
+                then_returned && else_returned
+            }
+
+            _ => false,
+        }
     }
 
     /// Compile a branch quotation (quotation inside then/else)
@@ -660,6 +734,13 @@ impl CodeGen {
 
     /// Compile a sequence of expressions (used for quotations and match branches)
     /// Returns (final_stack_var, ends_with_musttail)
+    ///
+    /// ends_with_musttail is true if the sequence ends with a WordCall in tail position
+    /// (which will be compiled as a musttail call). The caller should emit `ret ptr %stack`.
+    ///
+    /// If the sequence ends with a Match/If where all branches return, ends_with_musttail
+    /// is false but all code paths have already terminated. The caller should check
+    /// check_all_paths_returned() to determine this case.
     fn compile_expr_sequence(
         &mut self,
         exprs: &[Expr],
@@ -680,9 +761,12 @@ impl CodeGen {
             stack_var = self.compile_expr_with_context(expr, &stack_var, is_tail)?;
 
             // Check if the last expression is a WordCall in tail position
-            // (which compile_expr_with_context will compile as a musttail call)
-            if is_tail && let Expr::WordCall(_, _) = expr {
-                ends_with_musttail = true;
+            if is_tail {
+                if let Expr::WordCall(name, _) = expr {
+                    if !self.variant_tags.contains_key(name) {
+                        ends_with_musttail = true;
+                    }
+                }
             }
         }
         Ok((stack_var, ends_with_musttail))
@@ -697,7 +781,10 @@ impl CodeGen {
     ) -> CodegenResult<String> {
         match expr {
             // Tail-call optimization: if in tail position and calling a word, use musttail
-            Expr::WordCall(name, loc) if in_tail_position => {
+            // BUT: variant constructors are not actual functions, so they can't be tail-called
+            Expr::WordCall(name, loc)
+                if in_tail_position && !self.variant_tags.contains_key(name) =>
+            {
                 let result = self.fresh_temp();
                 let dbg = self.dbg_annotation(loc);
                 let func_name = Self::map_operator_to_function(name);
@@ -978,7 +1065,6 @@ impl CodeGen {
                 let match_id = self.temp_counter;
                 let merge_label = format!("match_merge_{}", match_id);
                 let default_label = format!("match_default_{}", match_id);
-                self.temp_counter += 1;
 
                 // Extract variant tag from stack top
                 // StackCell layout: { i32 tag, [4 x i8] padding, [16 x i8] union, ptr next }
@@ -1111,15 +1197,26 @@ impl CodeGen {
                         )));
                     };
 
-                    let (branch_stack, is_musttail) =
+                    let (branch_stack, ends_with_musttail) =
                         self.compile_expr_sequence(&branch.body, &initial_stack)?;
 
                     let predecessor = self.current_block.clone();
 
-                    if is_musttail {
-                        writeln!(&mut self.output, "  ret ptr %{}", branch_stack)
-                            .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                    // Check if this branch terminates (either via musttail or nested match/if)
+                    let Pattern::Variant { name } = &branch.pattern;
+                    let branch_last_expr = branch.body.last();
+                    let branch_terminates = ends_with_musttail
+                        || branch_last_expr.map_or(false, |e| self.check_all_paths_returned(e));
+
+                    if branch_terminates {
+                        // Branch terminates - emit ret if needed
+                        if ends_with_musttail {
+                            writeln!(&mut self.output, "  ret ptr %{}", branch_stack)
+                                .map_err(|e| CodegenError::InternalError(e.to_string()))?;
+                        }
+                        // If all paths already returned, no ret needed
                     } else {
+                        // Branch doesn't terminate - needs merge point
                         all_branches_musttail = false;
                         writeln!(&mut self.output, "  br label %{}", merge_label)
                             .map_err(|e| CodegenError::InternalError(e.to_string()))?;
@@ -1149,6 +1246,9 @@ impl CodeGen {
                         str_len, escaped
                     );
                     self.string_globals.push_str(&global_decl);
+                    // Mark as added to prevent duplicates
+                    self.string_constants
+                        .insert("match_error".to_string(), "@.str.match_error".to_string());
                 }
 
                 // Merge point
